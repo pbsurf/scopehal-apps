@@ -33,6 +33,7 @@ NOTE: This section only lists changes which are potentially breaking to an *end 
 * GUI: Crash dragging waveform between groups (https://github.com/ngscopeclient/scopehal-apps/issues/983, https://github.com/ngscopeclient/scopehal-apps/pull/1030)
 * GUI: Font preferences would have invalid default values because InitializeSearchPaths() was not called before the PreferenceManager constructor, leading to an empty search path and inability to find the default font
 * GUI: Flickering in stream browser when external trigger channel is present (https://github.com/ngscopeclient/scopehal-apps/pull/1026)
+* GUI: When dragging trigger position in a multi-scope session, all trigger positions would show at the mouse position, not just the one being dragged
 
 ## Other changes since v0.2.2
 

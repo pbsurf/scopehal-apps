@@ -1186,7 +1186,8 @@ void WaveformGroup::RenderTriggerPositionArrows(ImVec2 pos, float height)
 		}
 
 		//If actively dragging the trigger, show the arrow at the current mouse position
-		if(m_dragState == DRAG_STATE_TRIGGER)
+		//... but only if we're dragging *this* scope's trigger
+		if( (m_dragState == DRAG_STATE_TRIGGER) && (scope == m_scopeTriggerDuringDrag) )
 			xpos = mouse.x;
 
 		//Draw the arrow
