@@ -38,7 +38,7 @@
 class Texture;
 
 /**
-	@brief A GLFW window containing a Vulkan surface
+	@brief An SDL window containing a Vulkan surface
  */
 class VulkanWindow
 {
@@ -46,12 +46,14 @@ public:
 	VulkanWindow(const std::string& title, std::shared_ptr<QueueHandle> queue, bool noMaximize, bool noRestore);
 	virtual ~VulkanWindow();
 
-	GLFWwindow* GetWindow()
+	SDL_Window* GetWindow()
 	{ return m_window; }
 
-	// Return a DPI 'scale' value where 1 ~= 96DPI
-	// Akin to uses of `get_pango_context()->get_resolution() / 96` in glscopeclient
-	float GetContentScale();
+	bool ShouldClose()
+	{ return m_shouldClose; }
+
+	void RequestClose()
+	{ m_shouldClose = true; }
 
 	virtual void Render();
 
@@ -69,7 +71,7 @@ public:
 protected:
 	bool UpdateFramebuffer();
 	void SetFullscreen(bool fullscreen);
-	GLFWmonitor* GetCurrentMonitor();
+	int GetCurrentMonitor();
 	bool IsPositionValid(
 		const std::string& monitorName,
 		int monitorWidth,
@@ -80,8 +82,11 @@ protected:
 	virtual void DoRender(vk::raii::CommandBuffer& cmdBuf);
 	virtual void RenderUI();
 
-	///@brief The underlying GLFW window object
-	GLFWwindow* m_window;
+	///@brief The underlying SDL window object
+	SDL_Window* m_window;
+
+	///@brief Set true when the window has been asked to close
+	bool m_shouldClose = false;
 
 	///@brief ImGui context for GUI objects
 	ImGuiContext* m_context;

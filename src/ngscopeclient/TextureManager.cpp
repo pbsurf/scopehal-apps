@@ -422,12 +422,10 @@ png_structp TextureManager::LoadPNG(
 }
 
 /**
-	@brief Loads a PNG to a GLFWimage
+	@brief Loads a PNG to an SDL_Surface (caller owns the returned surface and must call SDL_FreeSurface on it)
  */
-GLFWimage TextureManager::LoadPNGToGLFWImage(const string& path)
+SDL_Surface* TextureManager::LoadPNGToSDLSurface(const string& path)
 {
-	GLFWimage img;
-
 	//Load the image metadata
 	size_t width;
 	size_t height;
@@ -437,30 +435,22 @@ GLFWimage TextureManager::LoadPNGToGLFWImage(const string& path)
 	auto png = LoadPNG(path, width, height, fp, info, end);
 	if(!png)
 	{
-		img.width = 0;
-		img.height = 0;
-		img.pixels = nullptr;
 		//fp is closed by LoadPNG in error case
-		return img;
+		return nullptr;
 	}
 
-	//Copy metadata and allocate pixels
-	img.width = width;
-	img.height = height;
-	int bytesPerComponent = 1;
-	size_t bytesPerPixel = 4*bytesPerComponent;
-	img.pixels = new uint8_t[width * height * bytesPerPixel];
+	auto surface = SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_RGBA32);
 
 	//Copy pixels
 	auto rowPtrs = png_get_rows(png, info);
-	size_t rowSize = width * bytesPerPixel;
+	size_t rowSize = width * 4;
 	for(size_t y=0; y<height; y++)
-		memcpy(img.pixels + (y*rowSize), rowPtrs[y], rowSize);
+		memcpy(static_cast<uint8_t*>(surface->pixels) + (y*rowSize), rowPtrs[y], rowSize);
 
 	//Clean up
 	png_destroy_read_struct(&png, &info, &end);
 	fclose(fp);
-	return img;
+	return surface;
 }
 
 /**

@@ -13,7 +13,7 @@ sudo dnf install -y \
 	libsigc++30-devel \
 	yaml-cpp-devel \
 	catch-devel \
-	glfw-devel \
+	SDL2-devel \
 	hidapi-devel \
 	ninja-build \
 	fedora-packager \

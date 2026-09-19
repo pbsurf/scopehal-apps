@@ -35,7 +35,7 @@
 #include "ngscopeclient.h"
 #include "NFDFileBrowser.h"
 #include "MainWindow.h"
-#include <nfd_glfw3.h>
+#include <nfd_sdl2.h>
 
 using namespace std;
 
@@ -138,7 +138,7 @@ optional<string> NFDFileBrowser::ThreadProc()
 		args.filterList = &filterItem;
 		args.filterCount = 1;
 		args.defaultPath = nullptr;
-		if(!NFD_GetNativeWindowFromGLFWWindow(m_parent->GetWindow(), &args.parentWindow))
+		if(!NFD_GetNativeWindowFromSDLWindow(m_parent->GetWindow(), &args.parentWindow))
 			LogError("failed to get window handle\n");
 
 		result = NFD_SaveDialogU8_With(&outPath, &args);
@@ -152,7 +152,7 @@ optional<string> NFDFileBrowser::ThreadProc()
 		args.filterList = &filterItem;
 		args.filterCount = 1;
 		args.defaultPath = nullptr;
-		if(!NFD_GetNativeWindowFromGLFWWindow(m_parent->GetWindow(), &args.parentWindow))
+		if(!NFD_GetNativeWindowFromSDLWindow(m_parent->GetWindow(), &args.parentWindow))
 			LogError("failed to get window handle\n");
 
 		//And run the dialog

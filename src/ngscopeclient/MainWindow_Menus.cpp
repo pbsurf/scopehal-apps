@@ -153,7 +153,7 @@ void MainWindow::FileMenu()
 		ImGui::Separator();
 
 		if(ImGui::MenuItem("Exit"))
-			glfwSetWindowShouldClose(m_window, 1);
+			RequestClose();
 
 		ImGui::EndMenu();
 	}

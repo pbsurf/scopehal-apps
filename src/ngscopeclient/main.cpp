@@ -270,7 +270,9 @@ int main(int argc, char* argv[])
 			g_mainWindow->SetStartupSession(sessionToOpen);
 
 		//Render the main window once, so it can initialize a new empty session before we connect any instruments
-		glfwPollEvents();
+		SDL_Event startupEvent;
+		while(SDL_PollEvent(&startupEvent))
+			ImGui_ImplSDL2_ProcessEvent(&startupEvent);
 		g_mainWindow->Render();
 
 		//Initialize the session with the requested arguments
@@ -303,13 +305,30 @@ int main(int argc, char* argv[])
 		}
 
 		//Main event loop
-		while(!glfwWindowShouldClose(g_mainWindow->GetWindow()))
+		SDL_Event event;
+		while(!g_mainWindow->ShouldClose())
 		{
 			//Check which event loop model to use
 			if(session.GetPreferences().GetEnumRaw("Power.Events.event_driven_ui") == 1)
-				glfwWaitEventsTimeout(session.GetPreferences().GetReal("Power.Events.polling_timeout") / FS_PER_SECOND);
-			else
-				glfwPollEvents();
+			{
+				//polling_timeout preference is in femtoseconds; SDL_WaitEventTimeout wants milliseconds
+				int timeoutMs = (int)(
+					session.GetPreferences().GetReal("Power.Events.polling_timeout") / FS_PER_SECOND * 1000.0);
+				if(SDL_WaitEventTimeout(&event, timeoutMs))
+				{
+					ImGui_ImplSDL2_ProcessEvent(&event);
+					if(event.type == SDL_QUIT)
+						g_mainWindow->RequestClose();
+				}
+			}
+
+			//Drain any additional events pending this frame (SDL_WaitEventTimeout only pops one)
+			while(SDL_PollEvent(&event))
+			{
+				ImGui_ImplSDL2_ProcessEvent(&event);
+				if(event.type == SDL_QUIT)
+					g_mainWindow->RequestClose();
+			}
 
 			//Draw the main window
 			g_mainWindow->Render();

@@ -228,8 +228,8 @@ if(NOT OpenMP_CXX_FOUND)
 	message(FATAL_ERROR "ngscopeclient requires OpenMP but your C++ compiler does not appear to support it.")
 endif()
 
-# GLFW is required
-find_package(glfw3 3.2 REQUIRED)
+# SDL2 is required
+find_package(SDL2 REQUIRED)
 
 # Find Vulkan-related packages
 #WORKAROUND glslang does not look for SPIRV-Tools-opt but needs it on macOS, harmless elsewhere

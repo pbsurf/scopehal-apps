@@ -31,13 +31,12 @@
 
 #include "../scopehal/scopehal.h"
 
-#define GLFW_INCLUDE_NONE
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
+#include <SDL.h>
+#include <SDL_vulkan.h>
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
-#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_sdl2.h>
 #include <backends/imgui_impl_vulkan.h>
 
 #include "ImGuiDisabler.h"

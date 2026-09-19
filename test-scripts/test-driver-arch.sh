@@ -11,7 +11,7 @@ sudo pacman -Syu --noconfirm --needed \
 	libsigc++ \
 	yaml-cpp \
 	catch2 \
-	glfw \
+	sdl2 \
 	curl \
 	hidapi \
 	ccache \

@@ -547,7 +547,7 @@ protected:
 	///@brief Current session data directory
 	std::string m_sessionDataDir;
 
-	///@brief Last window title set (glfw doesnt let us get this)
+	///@brief Last window title set (avoids redundant SDL_SetWindowTitle calls)
 	std::string m_lastWindowTitle;
 
 public:

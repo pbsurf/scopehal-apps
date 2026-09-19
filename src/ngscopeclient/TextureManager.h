@@ -111,7 +111,7 @@ public:
 		const std::string& name,
 		const std::string& path);
 
-	GLFWimage LoadPNGToGLFWImage(const std::string& path);
+	SDL_Surface* LoadPNGToSDLSurface(const std::string& path);
 
 	ImTextureID GetTexture(const std::string& name)
 	{

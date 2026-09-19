@@ -118,14 +118,8 @@ VulkanWindow::VulkanWindow(const string& title, shared_ptr<QueueHandle> queue, b
 	style.WindowRounding = 0.0f;
 	style.Colors[ImGuiCol_WindowBg].w = 1.0f;
 
-	//Don't create an OpenGL context - we use Vulkan
-	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-
-	//Don't move the mouse pointer when creating fullscreen windows
-	glfwWindowHint(GLFW_CENTER_CURSOR, GLFW_FALSE);
-
-	//Scale the initial window size by the monitor DPI
-	glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
+	//Window creation flags: Vulkan (not OpenGL), resizable, and DPI-aware
+	Uint32 windowFlags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
 
 	// Determine window creation mode according to preferences and command line arguments
 	bool maximized = false;
@@ -166,24 +160,29 @@ VulkanWindow::VulkanWindow(const string& title, shared_ptr<QueueHandle> queue, b
 	bool fullscreen = false;
 	if(windowed)
 	{	// Window creation with fixed size
-		m_window = glfwCreateWindow(1280, 720, title.c_str(), nullptr, nullptr);
+		m_window = SDL_CreateWindow(
+			title.c_str(), SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 1280, 720, windowFlags);
 	}
 	else
 	{	// Get primary monitor's content area for default sizing
-		GLFWmonitor* monitor = glfwGetPrimaryMonitor();
-		glfwGetMonitorWorkarea(monitor, &workAreaXPosition, &workAreaYPosition, &workAreaWidth, &workAreaHeight);
+		SDL_Rect workArea;
+		SDL_GetDisplayUsableBounds(0, &workArea);
+		workAreaXPosition = workArea.x;
+		workAreaYPosition = workArea.y;
+		workAreaWidth = workArea.w;
+		workAreaHeight = workArea.h;
 		LogTrace("Workarea position and size: %d %d %d %d\n", workAreaXPosition, workAreaYPosition, workAreaWidth, workAreaHeight);
 		windowWidth = workAreaWidth;
 		windowHeight = workAreaHeight;
 		if(restored)
 		{	// Restore window size and position from preferences
 			int windowWidthPref = preferences.GetInt("Appearance.Startup.startup_size_width");
-			int windowHeightPref = preferences.GetInt("Appearance.Startup.startup_size_heigth");
+			int windowHeightPref = preferences.GetInt("Appearance.Startup.startup_size_height");
 			int	windowXPositionPref = preferences.GetInt("Appearance.Startup.startup_pos_x");
 			int windowYPositionPref = preferences.GetInt("Appearance.Startup.startup_pos_y");
 			string monitorName = preferences.GetString("Appearance.Startup.monitor_name");
 			int monitorWidth = preferences.GetInt("Appearance.Startup.monitor_width");
-			int monitorHeight = preferences.GetInt("Appearance.Startup.monitor_heigth");
+			int monitorHeight = preferences.GetInt("Appearance.Startup.monitor_height");
 			fullscreen = preferences.GetBool("Appearance.Startup.startup_fullscreen");
 			maximized = preferences.GetBool("Appearance.Startup.startup_maximized");
 			if(windowWidthPref != 0 && windowHeightPref != 0 && IsPositionValid(monitorName, monitorWidth, monitorHeight, windowXPositionPref, windowYPositionPref))
@@ -209,7 +208,8 @@ VulkanWindow::VulkanWindow(const string& title, shared_ptr<QueueHandle> queue, b
 		}
 		// Create the window with calculated size on default monitor, we will reposition it after if needed
 		LogTrace("Creating window with size: %d %d and maximized = %d\n", windowWidth, windowHeight, maximized);
-		m_window = glfwCreateWindow(windowWidth, windowHeight, title.c_str(), nullptr, nullptr);
+		m_window = SDL_CreateWindow(
+			title.c_str(), SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, windowWidth, windowHeight, windowFlags);
 	}
 	if(!m_window)
 	{
@@ -221,7 +221,7 @@ VulkanWindow::VulkanWindow(const string& title, shared_ptr<QueueHandle> queue, b
 		int left, top, right, bottom;
 		if(!restoreWindowPosition)
 		{	// Get frame size to adjust window default position and size accordingly
-			glfwGetWindowFrameSize(m_window, &left, &top, &right, &bottom);
+			SDL_GetWindowBordersSize(m_window, &top, &left, &bottom, &right);
 			LogTrace("Window frame size: %d %d %d %d\n", top, left, right, bottom);
 			windowXPosition = 0;
 			windowYPosition = top;
@@ -229,8 +229,9 @@ VulkanWindow::VulkanWindow(const string& title, shared_ptr<QueueHandle> queue, b
 		}
 		LogTrace("Resizing window with postion and size: %d %d %d %d\n", windowXPosition, windowYPosition, windowWidth, windowHeight);
 		// Actually set the window position and size with calculated values
-		glfwSetWindowMonitor(m_window, nullptr, windowXPosition, windowYPosition, windowWidth, windowHeight, GLFW_DONT_CARE);
-		if(maximized) glfwMaximizeWindow(m_window);
+		SDL_SetWindowPosition(m_window, windowXPosition, windowYPosition);
+		SDL_SetWindowSize(m_window, windowWidth, windowHeight);
+		if(maximized) SDL_MaximizeWindow(m_window);
 		m_width = windowWidth;
 		m_height = windowHeight;
 	}
@@ -241,7 +242,7 @@ VulkanWindow::VulkanWindow(const string& title, shared_ptr<QueueHandle> queue, b
 
 	//Create a Vulkan surface for drawing onto
 	VkSurfaceKHR surface;
-	if(VK_SUCCESS != glfwCreateWindowSurface(**g_vkInstance, m_window, nullptr, &surface))
+	if(SDL_TRUE != SDL_Vulkan_CreateSurface(m_window, **g_vkInstance, &surface))
 	{
 		LogError("Vulkan surface creation failed\n");
 		abort();
@@ -271,7 +272,21 @@ VulkanWindow::VulkanWindow(const string& title, shared_ptr<QueueHandle> queue, b
 		poolSizes);
 	m_imguiDescriptorPool = make_shared<vk::raii::DescriptorPool>(*g_vkComputeDevice, poolInfo);
 
-	UpdateFramebuffer();
+	//On (at least) X11, the WM may not have finished mapping/sizing the window yet immediately after
+	//SDL_CreateWindow returns, so the Vulkan surface capabilities can transiently disagree with the window's
+	//requested size. UpdateFramebuffer() is designed to be retried in this case (see its 0x0/size-mismatch
+	//early-out paths, normally exercised by Render()) - retry here too, bounded so a real failure still surfaces.
+	int updateFramebufferAttempts = 0;
+	while(!UpdateFramebuffer())
+	{
+		if(++updateFramebufferAttempts > 500)
+		{
+			LogError("Timed out waiting for window to reach its requested size\n");
+			abort();
+		}
+		SDL_PumpEvents();
+		this_thread::sleep_for(chrono::milliseconds(10));
+	}
 
 	//Set up command pool
 	vk::CommandPoolCreateInfo cmdPoolInfo(
@@ -293,7 +308,7 @@ VulkanWindow::VulkanWindow(const string& title, shared_ptr<QueueHandle> queue, b
 	}
 
 	//Initialize ImGui
-	ImGui_ImplGlfw_InitForVulkan(m_window, true);
+	ImGui_ImplSDL2_InitForVulkan(m_window);
 	ImGui_ImplVulkan_InitInfo info = {};
 	info.Instance = **g_vkInstance;
 	info.PhysicalDevice = **g_vkComputePhysicalDevice;
@@ -411,10 +426,10 @@ VulkanWindow::~VulkanWindow()
 	m_renderPass = nullptr;
 	m_swapchain = nullptr;
 	m_surface = nullptr;
-	glfwDestroyWindow(m_window);
+	SDL_DestroyWindow(m_window);
 
 	ImGui_ImplVulkan_Shutdown();
-	ImGui_ImplGlfw_Shutdown();
+	ImGui_ImplSDL2_Shutdown();
 	ImGui::DestroyContext(m_context);
 
 	m_imguiDescriptorPool = nullptr;
@@ -442,7 +457,7 @@ bool VulkanWindow::UpdateFramebuffer()
 	auto caps = g_vkComputePhysicalDevice->getSurfaceCapabilitiesKHR(**m_surface);
 	int oldWidth = m_width;
 	int oldHeight = m_height;
-	glfwGetFramebufferSize(m_window, &m_width, &m_height);
+	SDL_Vulkan_GetDrawableSize(m_window, &m_width, &m_height);
 	if( (m_width == 0) || (m_height == 0) )
 	{
 		LogTrace("Invalid size 0x0 reported (window minimized?)\n");
@@ -577,14 +592,14 @@ void VulkanWindow::Render()
 		//waitIdle is exclusive with all other operations
 		lock_guard<shared_mutex> lock(g_vulkanActivityMutex);
 		g_vkComputeDevice->waitIdle();
-		glfwSetWindowSize(m_window, m_pendingWidth, m_pendingHeight);
+		SDL_SetWindowSize(m_window, m_pendingWidth, m_pendingHeight);
 		return;
 	}
 
 	//Check for resize
 	int fbWidth = 0;
 	int fbHeight = 0;
-	glfwGetFramebufferSize(m_window, &fbWidth, &fbHeight);
+	SDL_Vulkan_GetDrawableSize(m_window, &fbWidth, &fbHeight);
 	if( (fbWidth != m_width) || (fbHeight != m_height) )
 	{
 		m_resizeEventPending = true;
@@ -593,7 +608,7 @@ void VulkanWindow::Render()
 		//Just bail and don't draw anything in this case.
 		//See https://github.com/ngscopeclient/scopehal-apps/issues/893
 		#ifdef _WIN32
-			if(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED))
+			if(SDL_GetWindowFlags(m_window) & SDL_WINDOW_MINIMIZED)
 			{
 				this_thread::sleep_for(chrono::milliseconds(10));
 				return;
@@ -614,7 +629,7 @@ void VulkanWindow::Render()
 		QueueLock qlock(m_renderQueue);
 		ImGui_ImplVulkan_NewFrame();
 	}
-	ImGui_ImplGlfw_NewFrame();
+	ImGui_ImplSDL2_NewFrame();
 	ImGui::NewFrame();
 
 	//Make sure the old frame has completed
@@ -766,23 +781,9 @@ void VulkanWindow::DoRender(vk::raii::CommandBuffer& /*cmdBuf*/)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Window management
 
-GLFWmonitor* VulkanWindow::GetCurrentMonitor()
+int VulkanWindow::GetCurrentMonitor()
 {
-    int monitorNumber;
-    GLFWmonitor** monitors = glfwGetMonitors(&monitorNumber);
-    int wx, wy;
-    glfwGetWindowPos(m_window, &wx, &wy);
-    for (int i = 0; i < monitorNumber; ++i)
-    {
-        int mx, my, mw, mh;
-        glfwGetMonitorWorkarea(monitors[i], &mx, &my, &mw, &mh);
-        if (wx >= mx && wx < mx + mw && wy >= my && wy < my + mh)
-        {	// Window's top left corner is in this monitor's working area
-            return monitors[i];
-        }
-    }
-    // Not found
-    return nullptr;
+	return SDL_GetWindowDisplayIndex(m_window);
 }
 
 #define MINIMUM_WINDOW_VISIBLE_AREA_SIZE 100
@@ -794,17 +795,17 @@ bool VulkanWindow::IsPositionValid(
 	int windowXPos,
 	int windowYPos)
 {
-    int monitorNumber;
-    GLFWmonitor** monitors = glfwGetMonitors(&monitorNumber);
-    for (int i = 0; i < monitorNumber; ++i)
+    int numDisplays = SDL_GetNumVideoDisplays();
+    for (int i = 0; i < numDisplays; ++i)
     {
-		int mx, my, mw, mh;
-		glfwGetMonitorWorkarea(monitors[i], &mx, &my, &mw, &mh);
+		SDL_Rect rect;
+		SDL_GetDisplayUsableBounds(i, &rect);
+		int mx = rect.x, my = rect.y, mw = rect.w, mh = rect.h;
 		LogTrace("Checking monitor with position and size: %d %d %d %d for window pos %d %d and orginal monotir size %d %d\n", mx, my, mx, mh, windowXPos, windowYPos, monitorWidth, monitorHeight);
 		if (windowXPos >= mx && windowXPos + MINIMUM_WINDOW_VISIBLE_AREA_SIZE < mx + mw
 			&& windowYPos >= my && windowYPos + MINIMUM_WINDOW_VISIBLE_AREA_SIZE < my + mh)
 		{	// Check position name since several monitors can share the same name
-			string name = string(glfwGetMonitorName(monitors[i]));
+			string name = string(SDL_GetDisplayName(i));
 			LogTrace("Found match for name %s (original %s)\n", name.c_str(), monitorName.c_str());
 			if(name == monitorName && mw == monitorWidth && mh == monitorHeight)
 			{	// Monitor name and size match
@@ -832,7 +833,7 @@ void VulkanWindow::SetFullscreen(bool fullscreen)
 
 		m_windowedWidth = m_width;
 		m_windowedHeight = m_height;
-		glfwGetWindowPos(m_window, &m_windowedX, &m_windowedY);
+		SDL_GetWindowPosition(m_window, &m_windowedX, &m_windowedY);
 		LogTrace("Our window is at (%d, %d)\n", m_windowedX, m_windowedY);
 
 		//Find the centroid of our window
@@ -840,21 +841,20 @@ void VulkanWindow::SetFullscreen(bool fullscreen)
 		int centerY = m_windowedY + m_height/2;
 
 		//Which monitor are we on?
-		int count;
-		auto monitors = glfwGetMonitors(&count);
+		int count = SDL_GetNumVideoDisplays();
 		for(int i=0; i<count; i++)
 		{
-			int xpos, ypos;
-			glfwGetMonitorPos(monitors[i], &xpos, &ypos);
-			auto mode = glfwGetVideoMode(monitors[i]);
-			LogTrace("Monitor %d is at (%d, %d), (%d x %d)\n", i, xpos, ypos, mode->width, mode->height);
+			SDL_Rect bounds;
+			SDL_GetDisplayBounds(i, &bounds);
+			LogTrace("Monitor %d is at (%d, %d), (%d x %d)\n", i, bounds.x, bounds.y, bounds.w, bounds.h);
 			LogIndenter li2;
 
-			if( (centerX >= xpos) && (centerY >= ypos) &&
-				(centerX < (xpos + mode->width)) && (centerY < (ypos + mode->height)) )
+			if( (centerX >= bounds.x) && (centerY >= bounds.y) &&
+				(centerX < (bounds.x + bounds.w)) && (centerY < (bounds.y + bounds.h)) )
 			{
 				LogTrace("We are on this monitor\n");
-				glfwSetWindowMonitor(m_window, monitors[i], 0, 0, mode->width, mode->height, GLFW_DONT_CARE);
+				SDL_SetWindowPosition(m_window, bounds.x, bounds.y);
+				SDL_SetWindowFullscreen(m_window, SDL_WINDOW_FULLSCREEN_DESKTOP);
 				break;
 			}
 		}
@@ -863,36 +863,36 @@ void VulkanWindow::SetFullscreen(bool fullscreen)
 	else
 	{
 		LogTrace("Leaving fullscreen mode\n");
-		glfwSetWindowMonitor(
-			m_window,
-			nullptr,
-			m_windowedX,
-			m_windowedY,
-			m_windowedWidth,
-			m_windowedHeight,
-			GLFW_DONT_CARE);
+		SDL_SetWindowFullscreen(m_window, 0);
+		SDL_SetWindowPosition(m_window, m_windowedX, m_windowedY);
+		SDL_SetWindowSize(m_window, m_windowedWidth, m_windowedHeight);
 	}
 }
 
 void VulkanWindow::SaveWindowPositionAndSize()
 {
 	int x, y;
-	glfwGetWindowPos(m_window, &x, &y);
+	SDL_GetWindowPosition(m_window, &x, &y);
 	PreferenceManager& preferences = PreferenceManager::GetPreferences();
 	preferences.GetPreference("Appearance.Startup.startup_size_width").SetInt(m_width);
 	preferences.GetPreference("Appearance.Startup.startup_size_height").SetInt(m_height);
 	preferences.GetPreference("Appearance.Startup.startup_pos_x").SetInt(x);
 	preferences.GetPreference("Appearance.Startup.startup_pos_y").SetInt(y);
 	preferences.GetPreference("Appearance.Startup.startup_fullscreen").SetBool(m_fullscreen);
-	bool maximized = (glfwGetWindowAttrib(m_window, GLFW_MAXIMIZED) == GLFW_TRUE);
+	bool maximized = (SDL_GetWindowFlags(m_window) & SDL_WINDOW_MAXIMIZED) != 0;
 	preferences.GetPreference("Appearance.Startup.startup_maximized").SetBool(maximized);
 	int monitorWidth = 0, monitorHeight = 0;
 	string monitorName = "";
-	GLFWmonitor* currentMonitor = GetCurrentMonitor();
-	if(currentMonitor)
+	int currentMonitor = GetCurrentMonitor();
+	if(currentMonitor >= 0)
 	{
-		monitorName = glfwGetMonitorName(currentMonitor);
-		glfwGetMonitorWorkarea(currentMonitor,&x,&y,&monitorWidth,&monitorHeight);
+		monitorName = SDL_GetDisplayName(currentMonitor);
+		SDL_Rect rect;
+		SDL_GetDisplayUsableBounds(currentMonitor, &rect);
+		x = rect.x;
+		y = rect.y;
+		monitorWidth = rect.w;
+		monitorHeight = rect.h;
 	}
 	preferences.GetPreference("Appearance.Startup.monitor_width").SetInt(monitorWidth);
 	preferences.GetPreference("Appearance.Startup.monitor_height").SetInt(monitorHeight);

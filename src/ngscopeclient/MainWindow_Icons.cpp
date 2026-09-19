@@ -228,25 +228,16 @@ void MainWindow::LoadAppIcon()
 	//This code path is not used on macos which gets icons from the .app bundle
 	#ifndef __APPLE__
 
-		//Wayland gets icons from the .desktop file unless you have xdg-toplevel-icon which glfw doesn't support
+		//Wayland gets icons from the .desktop file unless you have xdg-toplevel-icon which SDL doesn't support either
 
-		//Load the images
-		const int nimages = 5;
-		GLFWimage images[nimages] =
-		{
-			m_texmgr.LoadPNGToGLFWImage(FindDataFile("icons/16x16/app-icon.png")),
-			m_texmgr.LoadPNGToGLFWImage(FindDataFile("icons/32x32/app-icon.png")),
-			m_texmgr.LoadPNGToGLFWImage(FindDataFile("icons/48x48/app-icon.png")),
-			m_texmgr.LoadPNGToGLFWImage(FindDataFile("icons/128x128/app-icon.png")),
-			m_texmgr.LoadPNGToGLFWImage(FindDataFile("icons/256x256/app-icon.png"))
-		};
+		//Load the image. Unlike GLFW, SDL only accepts a single resolution, so use the largest one we have.
+		auto icon = m_texmgr.LoadPNGToSDLSurface(FindDataFile("icons/256x256/app-icon.png"));
 
 		//Set it as the window icon
-		glfwSetWindowIcon(m_window, nimages, images);
+		SDL_SetWindowIcon(m_window, icon);
 
 		//Clean up
-		for(auto img : images)
-			delete[] img.pixels;
+		SDL_FreeSurface(icon);
 	#endif
 
 	m_texmgr.LoadTexture("app-icon", FindDataFile("icons/256x256/app-icon.png"));

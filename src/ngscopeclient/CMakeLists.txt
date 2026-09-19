@@ -44,7 +44,7 @@ set(IMGUI_FILES
 	../imgui/imgui_draw.cpp
 	../imgui/imgui_tables.cpp
 	../imgui/imgui_widgets.cpp
-	../imgui/backends/imgui_impl_glfw.cpp
+	../imgui/backends/imgui_impl_sdl2.cpp
 	../imgui/backends/imgui_impl_vulkan.cpp
 	../imgui/misc/cpp/imgui_stdlib.cpp
 	../imgui-node-editor/imgui_node_editor.cpp

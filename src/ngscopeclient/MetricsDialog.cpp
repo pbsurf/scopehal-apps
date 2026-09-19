@@ -47,13 +47,9 @@ MetricsDialog::MetricsDialog(Session* session)
 {
 	m_displayRefreshRate = 0;
 
-	auto mon = glfwGetPrimaryMonitor();
-	if(mon)
-	{
-		auto mode = glfwGetVideoMode(mon);
-		if(mode)
-			m_displayRefreshRate = mode->refreshRate;
-	}
+	SDL_DisplayMode mode;
+	if(SDL_GetCurrentDisplayMode(0, &mode) == 0)
+		m_displayRefreshRate = mode.refresh_rate;
 }
 
 MetricsDialog::~MetricsDialog()

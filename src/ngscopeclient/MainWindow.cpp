@@ -661,7 +661,7 @@ void MainWindow::RenderUI()
 	if(m_lastWindowTitle != title)
 	{
 		m_lastWindowTitle = title;
-		glfwSetWindowTitle(m_window, title.c_str());
+		SDL_SetWindowTitle(m_window, title.c_str());
 	}
 
 	auto defaultFont = GetFontPref("Appearance.General.default_font");

@@ -10,7 +10,7 @@ export PATH=/opt/homebrew/bin:/opt/homebrew:sbin:$PATH
 brew install \
 	pkg-config \
 	libsigc++@2 \
-	glfw \
+	sdl2 \
 	cmake \
 	yaml-cpp \
 	catch2 \
