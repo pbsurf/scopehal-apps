@@ -305,29 +305,58 @@ int main(int argc, char* argv[])
 		}
 
 		//Main event loop
+		//In event driven (power saving) mode, the loop sleeps until there's an event or the polling timeout expires.
+		//Dear ImGui often needs several frames to finish reacting to an input: a menu or popup only becomes visible
+		//the frame after the click that opened it, new windows are sized on their first frame, and so on.
+		//So after an event we render a few frames without waiting, then keep polling quickly for a while
+		//(for things that happen a fixed time after the mouse stops, like tooltips) before going back to sleep.
+		const int settleFrameCount = 3;
+		const Uint32 activeWindowMs = 1000;
+		const int activePollMs = 33;
+		int settleFramesLeft = 0;
+		Uint32 lastEventTicks = 0;
+
 		SDL_Event event;
 		while(!g_mainWindow->ShouldClose())
 		{
+			bool hadEvent = false;
+
 			//Check which event loop model to use
 			if(session.GetPreferences().GetEnumRaw("Power.Events.event_driven_ui") == 1)
 			{
-				//polling_timeout preference is in femtoseconds; SDL_WaitEventTimeout wants milliseconds
-				int timeoutMs = (int)(
-					session.GetPreferences().GetReal("Power.Events.polling_timeout") / FS_PER_SECOND * 1000.0);
-				if(SDL_WaitEventTimeout(&event, timeoutMs))
+				if(settleFramesLeft > 0)
+					settleFramesLeft --;
+				else
 				{
-					ImGui_ImplSDL2_ProcessEvent(&event);
-					if(event.type == SDL_QUIT)
-						g_mainWindow->RequestClose();
+					//polling_timeout preference is in femtoseconds; SDL_WaitEventTimeout wants milliseconds
+					int timeoutMs = (int)(
+						session.GetPreferences().GetReal("Power.Events.polling_timeout") / FS_PER_SECOND * 1000.0);
+					if( (SDL_GetTicks() - lastEventTicks) < activeWindowMs)
+						timeoutMs = min(timeoutMs, activePollMs);
+
+					if(SDL_WaitEventTimeout(&event, timeoutMs))
+					{
+						hadEvent = true;
+						ImGui_ImplSDL2_ProcessEvent(&event);
+						if(event.type == SDL_QUIT)
+							g_mainWindow->RequestClose();
+					}
 				}
 			}
 
 			//Drain any additional events pending this frame (SDL_WaitEventTimeout only pops one)
 			while(SDL_PollEvent(&event))
 			{
+				hadEvent = true;
 				ImGui_ImplSDL2_ProcessEvent(&event);
 				if(event.type == SDL_QUIT)
 					g_mainWindow->RequestClose();
+			}
+
+			if(hadEvent)
+			{
+				settleFramesLeft = settleFrameCount;
+				lastEventTicks = SDL_GetTicks();
 			}
 
 			//Draw the main window

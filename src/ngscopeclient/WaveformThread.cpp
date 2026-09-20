@@ -107,6 +107,7 @@ void WaveformThread(Session* session, atomic<bool>* shuttingDown)
 			session->RefreshAllFilters();
 			RenderAllWaveforms(cmdbuf, session, queue);
 			g_refilterDoneEvent.Signal();
+			WakeMainLoop();
 			continue;
 		}
 
@@ -117,6 +118,7 @@ void WaveformThread(Session* session, atomic<bool>* shuttingDown)
 			if(session->RefreshDirtyFilters())
 				RenderAllWaveforms(cmdbuf, session, queue);
 			g_refilterDoneEvent.Signal();
+			WakeMainLoop();
 			continue;
 		}
 
@@ -126,6 +128,7 @@ void WaveformThread(Session* session, atomic<bool>* shuttingDown)
 			LogTrace("WaveformThread: re-rendering\n");
 			RenderAllWaveforms(cmdbuf, session, queue);
 			g_rerenderDoneEvent.Signal();
+			WakeMainLoop();
 			continue;
 		}
 
@@ -150,6 +153,7 @@ void WaveformThread(Session* session, atomic<bool>* shuttingDown)
 
 		//Unblock the UI threads, then wait for acknowledgement that it's processed
 		g_waveformReadyEvent.Signal();
+		WakeMainLoop();
 		g_waveformProcessedEvent.Block();
 	}
 
