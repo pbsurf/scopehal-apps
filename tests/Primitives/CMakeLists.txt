@@ -7,6 +7,7 @@ add_executable(Primitives
 	DualFFT.cpp
 	EdgeDetection.cpp
 	Sampling.cpp
+	UnitFormatting.cpp
 )
 
 target_link_libraries(Primitives

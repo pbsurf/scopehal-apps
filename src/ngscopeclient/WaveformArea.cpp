@@ -1671,7 +1671,7 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 
 		//Figure out text size
 		string str =
-			"X = " + stream.GetXAxisUnits().PrettyPrint(label.m_peakXpos) + "\n" +
+			"X = " + stream.GetXAxisUnits().PrettyPrintInt64(label.m_peakXpos, Unit::MAX_INT64_DECIMALS) + "\n" +
 			"Y = " + stream.GetYAxisUnits().PrettyPrint(label.m_peakYpos) + "\n" +
 			"FWHM = " + stream.GetXAxisUnits().PrettyPrint(label.m_fwhm);
 		auto textSizePixels = ImGui::CalcTextSize(str.c_str());

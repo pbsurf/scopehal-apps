@@ -620,7 +620,7 @@ void WaveformGroup::RenderMarkers(ImVec2 pos, ImVec2 size)
 
 			//Text
 			//Anchor bottom right at the cursor
-			auto str = m.m_name + ": " + m_xAxisUnit.PrettyPrint(m.m_offset);
+			auto str = m.m_name + ": " + m_xAxisUnit.PrettyPrintInt64(m.m_offset, Unit::MAX_INT64_DECIMALS);
 			auto tsize = ImGui::CalcTextSize(str.c_str());
 			float padding = 2;
 			float wrounding = 2;
@@ -781,7 +781,9 @@ void WaveformGroup::RenderXAxisCursors(ImVec2 pos, ImVec2 size)
 
 		//Text
 		//Anchor bottom right at the cursor
-		auto str = string("X1: ") + m_xAxisUnit.PrettyPrint(m_xAxisCursorPositions[0]);
+		//Cursors are placed with the mouse, so only show as many digits as the distance between pixels allows
+		double pixelStep = (m_pixelsPerXUnit > 0) ? (1.0 / m_pixelsPerXUnit) : 0;
+		auto str = string("X1: ") + m_xAxisUnit.PrettyPrintInt64WithResolution(m_xAxisCursorPositions[0], pixelStep);
 		auto tsize = ImGui::CalcTextSize(str.c_str());
 		float padding = 2;
 		float wrounding = 2;
@@ -802,8 +804,8 @@ void WaveformGroup::RenderXAxisCursors(ImVec2 pos, ImVec2 size)
 			list->AddLine(ImVec2(xpos1, pos.y), ImVec2(xpos1, pos.y + size.y), cursor1_color, 1);
 
 			int64_t delta = m_xAxisCursorPositions[1] - m_xAxisCursorPositions[0];
-			str = string("X2: ") + m_xAxisUnit.PrettyPrint(m_xAxisCursorPositions[1]) + "\n" +
-				"ΔX = " + m_xAxisUnit.PrettyPrint(delta);
+			str = string("X2: ") + m_xAxisUnit.PrettyPrintInt64WithResolution(m_xAxisCursorPositions[1], pixelStep) + "\n" +
+				"ΔX = " + m_xAxisUnit.PrettyPrintInt64WithResolution(delta, pixelStep);
 
 			//If X axis is time domain, show frequency dual
 			Unit hz(Unit::UNIT_HZ);
@@ -1051,17 +1053,40 @@ void WaveformGroup::RenderTimeline(float width, float height)
 	int64_t width_xunits = width / xscale;
 	auto round_divisor = GetRoundingDivisor(width_xunits);
 
-	//Figure out about how much time per graduation to use
-	double grad_xunits_nominal = min_label_grad_width / xscale;
-
-	//Round so the division sizes are sane
-	double units_per_grad = grad_xunits_nominal * 1.0 / round_divisor;
-	double base = 5;
-	double log_units = log(units_per_grad) / log(base);
-	double log_units_rounded = ceil(log_units);
-	double units_rounded = pow(base, log_units_rounded);
+	//Labels are exact (as many digits as needed to tell them apart), so they get longer as we zoom in
 	float textMargin = 2;
-	int64_t grad_xunits_rounded = round(units_rounded * round_divisor);
+	auto labelFor = [&](double t)
+	{ return m_xAxisUnit.PrettyPrintInt64(llround(t), Unit::MAX_INT64_DECIMALS); };
+
+	//Figure out about how much time per graduation to use
+	//If the labels don't fit at that spacing, space them out more
+	double min_grad_width = min_label_grad_width;
+	int64_t grad_xunits_rounded = 0;
+	for(int pass = 0; pass < 3; pass++)
+	{
+		double grad_xunits_nominal = min_grad_width / xscale;
+
+		//Round so the division sizes are sane
+		double units_per_grad = grad_xunits_nominal * 1.0 / round_divisor;
+		double base = 5;
+		double log_units = log(units_per_grad) / log(base);
+		double log_units_rounded = ceil(log_units);
+		double units_rounded = pow(base, log_units_rounded);
+		grad_xunits_rounded = round(units_rounded * round_divisor);
+		if(grad_xunits_rounded == 0)
+			break;
+
+		//Check how wide the labels are
+		double first = round(m_xAxisOffset / grad_xunits_rounded) * grad_xunits_rounded;
+		float widest = 0;
+		for(double t = first - grad_xunits_rounded; t < (first + width_xunits + grad_xunits_rounded); t += grad_xunits_rounded)
+			widest = max(widest, ImGui::CalcTextSize(labelFor(t).c_str()).x);
+		double needed = widest + 2*textMargin + ImGui::GetFontSize();
+		if( (grad_xunits_rounded * xscale) >= needed)
+			break;
+
+		min_grad_width = needed;
+	}
 
 	//avoid divide-by-zero in weird cases with no waveform etc
 	if(grad_xunits_rounded == 0)
@@ -1114,7 +1139,7 @@ void WaveformGroup::RenderTimeline(float width, float height)
 		list->AddText(
 			ImVec2(x + textMargin, ymid),
 			textcolor,
-			m_xAxisUnit.PrettyPrint(t).c_str());
+			labelFor(t).c_str());
 	}
 
 	RenderTriggerPositionArrows(pos, height);
