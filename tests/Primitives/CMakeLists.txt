@@ -7,6 +7,7 @@ add_executable(Primitives
 	DemoFunctionGenerator.cpp
 	DualFFT.cpp
 	EdgeDetection.cpp
+	IIOMock.cpp
 	Sampling.cpp
 	UnitFormatting.cpp
 )

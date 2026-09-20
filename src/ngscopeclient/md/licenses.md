@@ -29,6 +29,7 @@ ngscopeclient and libscopehal include or depend on the following open source com
   * imgui_markdown (static, zlib license)
   * ImGuiFileDialog (static, MIT license)
   * imgui-node-editor (static, MIT license)
+  * libiio (shared, LGPLv2.1 license)
   * liblxi (shared, BSD-3/EPICS license)
   * libpng (shared, libpng license)
   * libsigc++ (shared, LGPLv3 license)
