@@ -780,7 +780,8 @@ void WaveformGroup::RenderXAxisCursors(ImVec2 pos, ImVec2 size)
 		list->AddLine(ImVec2(xpos0, pos.y), ImVec2(xpos0, pos.y + size.y), cursor0_color, 1);
 
 		//Text
-		//Anchor bottom right at the cursor
+		//Anchor bottom right at the cursor, or bottom left if there's only one cursor and it's in the left half of the
+		//plot so the label isn't cut off (with two cursors, the second one's label is to the right of it)
 		//Cursors are placed with the mouse, so only show as many digits as the distance between pixels allows
 		double pixelStep = (m_pixelsPerXUnit > 0) ? (1.0 / m_pixelsPerXUnit) : 0;
 		auto str = string("X1: ") + m_xAxisUnit.PrettyPrintInt64WithResolution(m_xAxisCursorPositions[0], pixelStep);
@@ -788,13 +789,15 @@ void WaveformGroup::RenderXAxisCursors(ImVec2 pos, ImVec2 size)
 		float padding = 2;
 		float wrounding = 2;
 		float textTop = pos.y + m_timelineHeight - (padding + tsize.y);
+		bool labelRight = (m_xAxisCursorMode == X_CURSOR_SINGLE) && (xpos0 < pos.x + size.x/2);
+		float labelLeft = labelRight ? (xpos0 + 1) : (xpos0 - (2*padding + tsize.x));
 		list->AddRectFilled(
-			ImVec2(xpos0 - (2*padding + tsize.x), textTop - padding ),
-			ImVec2(xpos0 - 1, pos.y + m_timelineHeight),
+			ImVec2(labelLeft, textTop - padding ),
+			ImVec2(labelLeft + (2*padding + tsize.x) - 1, pos.y + m_timelineHeight),
 			ImGui::GetColorU32(ImGuiCol_PopupBg),
 			wrounding);
 		list->AddText(
-			ImVec2(xpos0 - (padding + tsize.x), textTop),
+			ImVec2(labelLeft + padding, textTop),
 			cursor0_color,
 			str.c_str());
 
