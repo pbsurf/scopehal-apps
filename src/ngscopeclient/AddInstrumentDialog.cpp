@@ -224,6 +224,7 @@ bool AddInstrumentDialog::DoRender()
 				"Note that for twinlan, two port numbers are required (localhost:5025:5026) for SCPI and data ports respectively.",
 				"UART: device path and baud rate (/dev/ttyUSB0:9600, COM1). Default is 115200 if not specified. ",
 				"USBTMC: Linux device path (/dev/usbtmcX)",
+				"IIO: libiio context URI (ip:192.168.2.1, usb:1.5.5, local:). \"mock:\" simulates an AD9363 for testing.",
 				"USB-HID: Device vendor id, product id (and optionnaly serial number): <vendorId(hex)>:<productId(hex)>:<serialNumber> (e.g.: 2e3c:af01)"
 			}
 		);
@@ -299,8 +300,10 @@ bool AddInstrumentDialog::DoConnect(SCPITransport* transport)
 
 void AddInstrumentDialog::UpdatePath()
 {
-	if(m_selectedTransportType == SCPITransportType::TRANSPORT_HID)
-	{	// Special handling for HID transport: replace the whole path with endpoint value
+	if( (m_selectedTransportType == SCPITransportType::TRANSPORT_HID) ||
+		(m_selectedTransportType == SCPITransportType::TRANSPORT_IIO) )
+	{	// Special handling for HID and IIO transports: replace the whole path with endpoint value
+		// (the endpoint is a complete IIO context URI such as usb:1.5.5, so we must not keep the old suffix)
 		m_path = m_endpoints[m_selectedEndpoint].path;
 	}
 	else

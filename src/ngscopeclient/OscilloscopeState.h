@@ -79,6 +79,13 @@ public:
 
 		m_adcMode = std::make_unique<int[]>(n);
 
+		m_hasGain = std::make_unique<bool[]>(n);
+		m_gainAdjustable = std::make_unique<bool[]>(n);
+		m_gainMode = std::make_unique<int[]>(n);
+		m_gainModes = std::make_unique<std::vector<std::string>[]>(n);
+		m_committedGain = std::make_unique<float[]>(n);
+		m_strGain = std::make_unique<std::string[]>(n);
+
 		Unit volts(Unit::UNIT_VOLTS);
 
 		for(size_t i=0; i<n; i++)
@@ -91,6 +98,11 @@ public:
 			m_channelCoupling[i] = 0;
 			m_channelBandwidthLimit[i] = 0;
 			m_adcMode[i] = 0;
+
+			m_hasGain[i] = false;
+			m_gainAdjustable[i] = false;
+			m_gainMode[i] = 0;
+			m_committedGain[i] = 0;
 
 			// Offset and range ar per stream
 			OscilloscopeChannel* chan = dynamic_cast<OscilloscopeChannel*>(scope->GetChannel(i));
@@ -155,6 +167,14 @@ public:
 	std::unique_ptr<std::string[]> m_strAttenuation;
 
 	std::unique_ptr<int[]> m_adcMode;
+
+	//RX gain (SDRs only)
+	std::unique_ptr<bool[]> m_hasGain;
+	std::unique_ptr<bool[]> m_gainAdjustable;
+	std::unique_ptr<int[]> m_gainMode;
+	std::unique_ptr<std::vector<std::string>[]> m_gainModes;
+	std::unique_ptr<float[]> m_committedGain;
+	std::unique_ptr<std::string[]> m_strGain;
 };
 
 #endif

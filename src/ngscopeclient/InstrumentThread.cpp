@@ -66,6 +66,7 @@ void InstrumentThread(InstrumentThreadArgs args)
 	//Extract type-specified fields
 	auto load = dynamic_pointer_cast<Load>(inst);
 	auto scope = dynamic_pointer_cast<Oscilloscope>(inst);
+	auto sdr = dynamic_pointer_cast<SCPISDR>(inst);
 	auto bert = dynamic_pointer_cast<SCPIBERT>(inst);
 	auto meter = dynamic_pointer_cast<SCPIMultimeter>(inst);
 	auto rfgen = dynamic_pointer_cast<SCPIRFSignalGenerator>(inst);
@@ -160,6 +161,25 @@ void InstrumentThread(InstrumentThreadArgs args)
 							scopestate->m_committedAttenuation[i] = scopestate->m_channelAttenuation[i];
 							Unit counts(Unit::UNIT_COUNTS);
 							scopestate->m_strAttenuation[i] = counts.PrettyPrint(scopestate->m_committedAttenuation[i]);
+
+							//SDR receive gain
+							scopestate->m_hasGain[i] = sdr && sdr->HasGainControl(i);
+							if(scopestate->m_hasGain[i])
+							{
+								Unit db(Unit::UNIT_DB);
+								scopestate->m_committedGain[i] = sdr->GetGain(i);
+								scopestate->m_strGain[i] = db.PrettyPrint(scopestate->m_committedGain[i]);
+								scopestate->m_gainAdjustable[i] = sdr->IsGainAdjustable(i);
+
+								scopestate->m_gainModes[i] = sdr->GetGainModes(i);
+								scopestate->m_gainMode[i] = 0;
+								auto curMode = sdr->GetGainMode(i);
+								for(size_t j=0; j<scopestate->m_gainModes[i].size(); j++)
+								{
+									if(scopestate->m_gainModes[i][j] == curMode)
+										scopestate->m_gainMode[i] = j;
+								}
+							}
 
 							size_t nstreams = scopechan->GetStreamCount();
 							for(size_t j=0; j<nstreams; j++)

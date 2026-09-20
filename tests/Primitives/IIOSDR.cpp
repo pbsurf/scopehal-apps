@@ -168,17 +168,34 @@ TEST_CASE("IIOSDR_Configuration")
 	REQUIRE(ctx->ReadChannelAttrInt(phy, "altvoltage0", true, "frequency", v));
 	REQUIRE(v == 1000000000);
 
-	//The hardware wins if it disagrees. Bandwidth was too wide for the AD9363 and gets clamped.
+	//The limits the radio publishes are used to clamp requests right away, so the UI shows the truth immediately.
+	//This is an AD9363, which is more restricted than an AD9361.
 	sdr->SetSpan(50000000);
-	REQUIRE(sdr->GetSpan() == 50000000);
-	sdr->BackgroundProcessing();
 	REQUIRE(sdr->GetSpan() == 20000000);
-
-	//The AD9363 can't tune this low, so the request is rejected and we go back to what the radio is really doing
 	sdr->SetCenterFrequency(0, 100000000);
-	REQUIRE(sdr->GetCenterFrequency(0) == 100000000);
+	REQUIRE(sdr->GetCenterFrequency(0) == 325000000);
+	sdr->SetCenterFrequency(0, 5000000000);
+	REQUIRE(sdr->GetCenterFrequency(0) == 3800000000);
+	sdr->SetCenterFrequency(0, 325000000);
 	sdr->BackgroundProcessing();
-	REQUIRE(sdr->GetCenterFrequency(0) == 1000000000);
+	REQUIRE(ctx->ReadChannelAttrInt(phy, "altvoltage0", true, "frequency", v));
+	REQUIRE(v == 325000000);
+	REQUIRE(sdr->GetCenterFrequency(0) == 325000000);
+	REQUIRE(ctx->ReadChannelAttrInt(phy, "voltage0", false, "rf_bandwidth", v));
+	REQUIRE(v == 20000000);
+
+	//The AD9361 goes lower and wider
+	IIOContext* ctx2;
+	auto sdr2 = MakeSDR("mock:ad9361", ctx2);
+	sdr2->SetCenterFrequency(0, 100000000);
+	sdr2->SetSpan(50000000);
+	REQUIRE(sdr2->GetCenterFrequency(0) == 100000000);
+	REQUIRE(sdr2->GetSpan() == 50000000);
+	sdr2->BackgroundProcessing();
+	REQUIRE(ctx2->ReadChannelAttrInt(phy, "altvoltage0", true, "frequency", v));
+	REQUIRE(v == 100000000);
+	REQUIRE(ctx2->ReadChannelAttrInt(phy, "voltage0", false, "rf_bandwidth", v));
+	REQUIRE(v == 50000000);
 
 	//Requests beyond what any AD936x can do are clamped before they get to the hardware
 	sdr->SetSampleRate(1000);
@@ -342,6 +359,198 @@ TEST_CASE("IIOSDR_TwoChannels")
 	rx2 = ToneMagnitude(sdr->GetChannel(1)->GetData(0), sdr->GetChannel(1)->GetData(1), 500000);
 	REQUIRE(rx2 > 0.25);
 	REQUIRE(rx2 < 0.4);
+}
+
+TEST_CASE("IIOSDR_Gain")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9363", ctx);
+
+	REQUIRE(sdr->HasGainControl(0));
+	REQUIRE(!sdr->HasGainControl(1));
+
+	//Modes come from the radio. A radio powers up running AGC, so the gain is not adjustable.
+	auto modes = sdr->GetGainModes(0);
+	REQUIRE(modes.size() == 4);
+	REQUIRE(modes[0] == "manual");
+	REQUIRE(sdr->GetGainMode(0) == "slow_attack");
+	REQUIRE(!sdr->IsGainAdjustable(0));
+
+	auto range = sdr->GetGainRange(0);
+	REQUIRE(range.first == -1);
+	REQUIRE(range.second == 73);
+	REQUIRE(sdr->GetGain(0) == 71);
+
+	//You can ask for a gain in AGC mode, but it doesn't reach the hardware until the mode changes
+	sdr->SetGain(0, 30);
+	REQUIRE(sdr->GetGain(0) == 30);
+	sdr->BackgroundProcessing();
+	double hw;
+	string hwmode;
+	REQUIRE(ctx->ReadChannelAttrDouble(phy, "voltage0", false, "hardwaregain", hw));
+	REQUIRE(hw == 71);
+	REQUIRE(sdr->GetGain(0) == 30);
+
+	sdr->SetGainMode(0, "manual");
+	REQUIRE(sdr->IsGainAdjustable(0));
+	sdr->BackgroundProcessing();
+	REQUIRE(ctx->ReadChannelAttr(phy, "voltage0", false, "gain_control_mode", hwmode));
+	REQUIRE(hwmode == "manual");
+	REQUIRE(ctx->ReadChannelAttrDouble(phy, "voltage0", false, "hardwaregain", hw));
+	REQUIRE(hw == 30);
+	REQUIRE(sdr->GetGain(0) == 30);
+
+	//Now changes apply directly
+	sdr->SetGain(0, 45.5);
+	sdr->BackgroundProcessing();
+	REQUIRE(ctx->ReadChannelAttrDouble(phy, "voltage0", false, "hardwaregain", hw));
+	REQUIRE(fabs(hw - 45.5) < 1e-3);
+
+	//Clamped to the range
+	sdr->SetGain(0, 100);
+	REQUIRE(sdr->GetGain(0) == 73);
+	sdr->SetGain(0, -50);
+	REQUIRE(sdr->GetGain(0) == -1);
+
+	//Unknown modes are ignored
+	sdr->SetGainMode(0, "bogus");
+	REQUIRE(sdr->GetGainMode(0) == "manual");
+
+	//And back to AGC
+	sdr->SetGainMode(0, "fast_attack");
+	REQUIRE(!sdr->IsGainAdjustable(0));
+	sdr->BackgroundProcessing();
+	REQUIRE(ctx->ReadChannelAttr(phy, "voltage0", false, "gain_control_mode", hwmode));
+	REQUIRE(hwmode == "fast_attack");
+
+	//AD9361 has a different range
+	IIOContext* ctx2;
+	auto sdr2 = MakeSDR("mock:ad9361", ctx2);
+	REQUIRE(sdr2->HasGainControl(1));
+	range = sdr2->GetGainRange(1);
+	REQUIRE(range.first == -3);
+	REQUIRE(range.second == 71);
+
+	//Second channel is independent
+	sdr2->SetGainMode(1, "manual");
+	sdr2->SetGain(1, 10);
+	sdr2->BackgroundProcessing();
+	REQUIRE(sdr2->GetGainMode(0) == "slow_attack");
+	REQUIRE(sdr2->GetGainMode(1) == "manual");
+	REQUIRE(ctx2->ReadChannelAttrDouble(phy, "voltage1", false, "hardwaregain", hw));
+	REQUIRE(hw == 10);
+}
+
+TEST_CASE("IIOSDR_GainAffectsSignal")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9363", ctx);
+	auto chan = sdr->GetChannel(0);
+	sdr->SetSampleDepth(4096);
+
+	//In manual mode the mock's signal level follows the gain (20 dB is the reference, +/- 6 dB is 2x)
+	sdr->SetGainMode(0, "manual");
+	sdr->SetGain(0, 20);
+	sdr->BackgroundProcessing();
+	sdr->StartSingleTrigger();
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	double at20 = ToneMagnitude(chan->GetData(0), chan->GetData(1), 500000);
+	REQUIRE(at20 > 0.45);
+	REQUIRE(at20 < 0.55);
+
+	sdr->SetGain(0, 14);
+	sdr->BackgroundProcessing();
+	sdr->StartSingleTrigger();
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	double at14 = ToneMagnitude(chan->GetData(0), chan->GetData(1), 500000);
+	REQUIRE(at14 > 0.22);
+	REQUIRE(at14 < 0.28);
+}
+
+TEST_CASE("IIOSDR_Limits")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9363", ctx);
+
+	//Everything offered in the UI is within what the radio can do
+	for(auto r : sdr->GetSampleRatesNonInterleaved())
+	{
+		REQUIRE(r >= 2083334);
+		REQUIRE(r <= 61440000);
+	}
+
+	sdr->SetSampleRate(1000);
+	REQUIRE(sdr->GetSampleRate() == 2083334);
+	sdr->SetSampleRate(1000000000);
+	REQUIRE(sdr->GetSampleRate() == 61440000);
+	sdr->SetSpan(1);
+	REQUIRE(sdr->GetSpan() == 200000);
+}
+
+TEST_CASE("IIOSDR_SessionRoundTrip")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9361", ctx);
+
+	sdr->SetCenterFrequency(0, 915000000);
+	sdr->SetSpan(5000000);
+	sdr->SetSampleRate(10000000);
+	sdr->SetSampleDepth(16384);
+	sdr->EnableChannel(1);
+	sdr->DisableChannel(0);
+	sdr->SetGainMode(0, "hybrid");
+	sdr->SetGainMode(1, "manual");
+	sdr->SetGain(1, 33);
+	sdr->BackgroundProcessing();
+
+	IDTable table;
+	auto node = sdr->SerializeConfiguration(table);
+	REQUIRE(node["driver"].as<string>() == "iio");
+	REQUIRE(node["transport"].as<string>() == "iio");
+	REQUIRE(node["args"].as<string>() == "mock:ad9361");
+
+	//Load it into a fresh instance, which starts out with the radio's defaults
+	IIOContext* ctx2;
+	auto sdr2 = MakeSDR("mock:ad9361", ctx2);
+	REQUIRE(sdr2->GetCenterFrequency(0) == 2400000000);
+	IDTable idmap;
+	sdr2->LoadConfiguration(2, node, idmap);
+	sdr2->BackgroundProcessing();
+
+	REQUIRE(sdr2->GetCenterFrequency(0) == 915000000);
+	REQUIRE(sdr2->GetSpan() == 5000000);
+	REQUIRE(sdr2->GetSampleRate() == 10000000);
+	REQUIRE(sdr2->GetSampleDepth() == 16384);
+	REQUIRE(!sdr2->IsChannelEnabled(0));
+	REQUIRE(sdr2->IsChannelEnabled(1));
+	REQUIRE(sdr2->GetGainMode(0) == "hybrid");
+	REQUIRE(sdr2->GetGainMode(1) == "manual");
+	REQUIRE(sdr2->GetGain(1) == 33);
+
+	//And it all made it to the radio
+	int64_t v;
+	double gain;
+	REQUIRE(ctx2->ReadChannelAttrInt(phy, "altvoltage0", true, "frequency", v));
+	REQUIRE(v == 915000000);
+	REQUIRE(ctx2->ReadChannelAttrInt(phy, "voltage0", false, "rf_bandwidth", v));
+	REQUIRE(v == 5000000);
+	REQUIRE(ctx2->ReadChannelAttrDouble(phy, "voltage1", false, "hardwaregain", gain));
+	REQUIRE(gain == 33);
+}
+
+TEST_CASE("IIOSDR_Scan")
+{
+	//We can't count on any hardware being attached, but scanning must work and never report simulated devices
+	for(auto& it : IIOContext::Scan())
+	{
+		REQUIRE(it.first.size() > 0);
+		REQUIRE(it.first.find("mock:") != 0);
+	}
+
+	//Endpoint enumeration for the add instrument dialog is the same list
+	REQUIRE(SCPITransport::EnumEndpoints("iio").size() == IIOContext::Scan().size());
 }
 
 #endif

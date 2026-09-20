@@ -1917,18 +1917,77 @@ void StreamBrowserDialog::renderChannelProperties(
 	float fontSize = ImGui::GetFontSize();
 	float width = 8*fontSize;
 
-	Unit counts(Unit::UNIT_COUNTS);
-	if(renderEditableProperty(
-		width,
-		"Attenuation",
-		scopeState->m_strAttenuation[channelIndex],
-		scopeState->m_committedAttenuation[channelIndex],
-		counts,
-		"Attenuation setting for the probe (for example, 10 for a 10:1 probe)"))
+	//SDR receive gain replaces attenuation, since a radio has no probe to compensate for
+	auto sdr = dynamic_pointer_cast<SCPISDR>(scope);
+	if(sdr && scopeState->m_hasGain[channelIndex])
 	{
-		// Update offset
-		scopechan->SetAttenuation(scopeState->m_committedAttenuation[channelIndex]);
-		scopeState->m_needsUpdate[channelIndex] = true;
+		Unit db(Unit::UNIT_DB);
+
+		//Only show mode selection if there is a choice
+		if(scopeState->m_gainModes[channelIndex].size() > 1)
+		{
+			ImGui::SetNextItemWidth(width);
+			if(renderCombo(
+				"Gain mode",
+				false,
+				ImGui::GetStyleColorVec4(ImGuiCol_FrameBg),
+				scopeState->m_gainMode[channelIndex],
+				scopeState->m_gainModes[channelIndex],
+				false,
+				0,
+				false))
+			{
+				sdr->SetGainMode(channelIndex, scopeState->m_gainModes[channelIndex][scopeState->m_gainMode[channelIndex]]);
+
+				//The mode changes whether the gain can be set, and may change its value
+				scopeState->m_needsUpdate[channelIndex] = true;
+			}
+			HelpMarker(
+				"Gain control mode of the receiver.\n\n"
+				"In manual mode the gain is fixed at the value below. The other modes use automatic gain "
+				"control (AGC) to adapt to the signal level, and the gain cannot be set by hand.");
+		}
+
+		//Can't set the gain by hand if the radio is running AGC
+		bool adjustable = scopeState->m_gainAdjustable[channelIndex];
+		auto range = sdr->GetGainRange(channelIndex);
+		char help[128];
+		snprintf(help, sizeof(help), "Receive gain, from %.0f to %.0f dB.%s",
+			range.first, range.second,
+			adjustable ? "" : "\n\nThis is disabled because automatic gain control is active.");
+		if(!adjustable)
+			ImGui::BeginDisabled();
+		if(renderEditableProperty(
+			width,
+			"Gain",
+			scopeState->m_strGain[channelIndex],
+			scopeState->m_committedGain[channelIndex],
+			db,
+			help))
+		{
+			sdr->SetGain(channelIndex, scopeState->m_committedGain[channelIndex]);
+
+			//Refresh in case the driver limited the value
+			scopeState->m_needsUpdate[channelIndex] = true;
+		}
+		if(!adjustable)
+			ImGui::EndDisabled();
+	}
+	else
+	{
+		Unit counts(Unit::UNIT_COUNTS);
+		if(renderEditableProperty(
+			width,
+			"Attenuation",
+			scopeState->m_strAttenuation[channelIndex],
+			scopeState->m_committedAttenuation[channelIndex],
+			counts,
+			"Attenuation setting for the probe (for example, 10 for a 10:1 probe)"))
+		{
+			// Update offset
+			scopechan->SetAttenuation(scopeState->m_committedAttenuation[channelIndex]);
+			scopeState->m_needsUpdate[channelIndex] = true;
+		}
 	}
 
 	//Only show coupling box if the instrument has configurable coupling
