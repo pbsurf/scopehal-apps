@@ -856,7 +856,13 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 			auto wheel = ImGui::GetIO().MouseWheel;
 			auto wheel_h = ImGui::GetIO().MouseWheelH;
 			if((wheel != 0) || (wheel_h != 0))
-				OnMouseWheelPlotArea(wheel, wheel_h);
+			{
+				//Touchscreen wheel events are pinch zoom (see imgui_impl_sdl2.cpp)
+				if(ImGui::GetIO().MouseSource == ImGuiMouseSource_TouchScreen)
+					OnPinchZoom(wheel, wheel_h);
+				else
+					OnMouseWheelPlotArea(wheel, wheel_h);
+			}
 		}
 
 		//Make targets for drag-and-drop
@@ -3045,7 +3051,13 @@ void WaveformArea::RenderYAxis(ImVec2 size, map<float, float>& gridmap, float vb
 	if(ImGui::IsItemHovered())
 	{
 		auto wheel = ImGui::GetIO().MouseWheel;
-		if(wheel != 0)
+		auto wheel_h = ImGui::GetIO().MouseWheelH;
+		if(ImGui::GetIO().MouseSource == ImGuiMouseSource_TouchScreen)
+		{
+			if((wheel != 0) || (wheel_h != 0))
+				OnPinchZoom(wheel, wheel_h);
+		}
+		else if(wheel != 0)
 			OnMouseWheelYAxis(wheel);
 	}
 
@@ -4813,9 +4825,27 @@ void WaveformArea::OnMouseWheelPlotArea(float delta, float delta_h)
 }
 
 /**
+	@brief Handles pinch zoom (converted to mouse wheel events by the imgui SDL backend)
+
+	The backend picks the wheel axis from the orientation of the fingers, independent of what is being hovered:
+	horizontal fingers give delta_h and zoom the X axis, vertical fingers give delta and zoom the Y axis.
+
+	@param delta	Vertical wheel steps (Y axis zoom)
+	@param delta_h	Horizontal wheel steps (X axis zoom)
+ */
+void WaveformArea::OnPinchZoom(float delta, float delta_h)
+{
+	//Pinch scales by the same 1.5x per wheel step as X axis zoom so the content tracks the fingers 1:1
+	if(delta_h != 0)
+		OnMouseWheelPlotArea(delta_h, 0);
+	if(delta != 0)
+		OnMouseWheelYAxis(delta, 1.0f / 1.5f);
+}
+
+/**
 	@brief Handles a mouse wheel scroll step on the Y axis
  */
-void WaveformArea::OnMouseWheelYAxis(float delta)
+void WaveformArea::OnMouseWheelYAxis(float delta, float zoomBase)
 {
 	//If in the tutorial, ungate the wizard
 	auto tutorial = m_parent->GetTutorialWizard();
@@ -4835,7 +4865,7 @@ void WaveformArea::OnMouseWheelYAxis(float delta)
 	if(delta > 0)
 	{
 		auto range = stream.GetVoltageRange();
-		range *= pow(0.9, delta);
+		range *= pow(zoomBase, delta);
 
 		for(size_t i=0; i<m_inputs.size(); i++)
 			m_inputs[i]->m_sourceStream.SetVoltageRange(range);
@@ -4843,7 +4873,7 @@ void WaveformArea::OnMouseWheelYAxis(float delta)
 	else
 	{
 		auto range = stream.GetVoltageRange();
-		range /= pow(0.9, -delta);
+		range /= pow(zoomBase, -delta);
 
 		for(size_t i=0; i<m_inputs.size(); i++)
 			m_inputs[i]->m_sourceStream.SetVoltageRange(range);

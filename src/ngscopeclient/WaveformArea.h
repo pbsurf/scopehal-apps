@@ -678,7 +678,8 @@ protected:
 	StreamDescriptor m_dragStream;
 
 	void OnMouseWheelPlotArea(float delta, float delta_h);
-	void OnMouseWheelYAxis(float delta);
+	void OnMouseWheelYAxis(float delta, float zoomBase = 0.9f);
+	void OnPinchZoom(float delta, float delta_h);
 	void OnMouseUp();
 	void OnDragUpdate();
 
