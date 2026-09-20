@@ -292,8 +292,19 @@ public:
 	const std::map<uintptr_t, std::string>& GetGraphEditorGroups()
 	{ return m_graphEditorGroups; }
 
-	void SetStartupSession(const std::string& path)
-	{ m_startupSession = path; }
+	///@brief What to do when starting up with a session file
+	enum StartupSessionMode
+	{
+		STARTUP_SESSION_PROMPT,		//Ask whether to reconnect to instruments or load offline
+		STARTUP_SESSION_RECONNECT,	//Reconnect to instruments without asking
+		STARTUP_SESSION_OFFLINE		//Load for offline analysis without asking
+	};
+
+	void SetStartupSession(const std::string& path, StartupSessionMode mode = STARTUP_SESSION_PROMPT)
+	{
+		m_startupSession = path;
+		m_startupSessionMode = mode;
+	}
 
 	///@brief Gets a pointer to the tutorial wizard (if we have one open)
 	std::shared_ptr<TutorialWizard> GetTutorialWizard()
@@ -485,6 +496,9 @@ protected:
 
 	///@brief Pending request to open a session
 	std::string m_startupSession;
+
+	///@brief Whether to ask how to open m_startupSession
+	StartupSessionMode m_startupSessionMode;
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// Session state

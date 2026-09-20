@@ -80,6 +80,11 @@ static void print_help(FILE* stream)
 		"  saved from the graphical interface as the sole non-option argument.\n"
 		"  The file name _must_ end in '.scopesession'.\n"
 		"\n"
+		"  Normally you will be asked whether to reconnect to the instruments or\n"
+		"  load the saved data for offline analysis. To skip the question, use:\n"
+		"  --reconnect      reconnect to the instruments the session was using\n"
+		"  --offline        load the session for offline analysis\n"
+		"\n"
 		"Instrument connection strings:\n"
 		"  When starting a new session, you may provide one or more instrument\n"
 		"  connection strings as arguments, which will be added to the session.\n"
@@ -125,6 +130,8 @@ int main(int argc, char* argv[])
 	string sessionToOpen;
 	bool maximize = false;
 	bool restore = false;
+	bool reconnectSession = false;
+	bool offlineSession = false;
 	vector<string> instrumentConnectionStrings;
 	for(int i=1; i<argc; i++)
 	{
@@ -155,6 +162,18 @@ int main(int argc, char* argv[])
 		if (s == "--restore" || s == "-r")
 		{
 			restore = true;
+			continue;
+		}
+
+		if (s == "--reconnect")
+		{
+			reconnectSession = true;
+			continue;
+		}
+
+		if (s == "--offline")
+		{
+			offlineSession = true;
 			continue;
 		}
 
@@ -210,6 +229,18 @@ int main(int argc, char* argv[])
 			LogNotice("Startup: run from a console, keeping stdout log sink attached\n");
 		}
 	#endif
+
+	//Check the options that skip the prompt when loading a session
+	if(reconnectSession && offlineSession)
+	{
+		LogError("Cannot use --reconnect and --offline together\n");
+		return 1;
+	}
+	if( (reconnectSession || offlineSession) && sessionToOpen.empty() )
+	{
+		LogError("--reconnect and --offline can only be used when loading a session\n");
+		return 1;
+	}
 
 	//Can't load a session and reconnect to an instrument, has to be one or the other
 	if( !sessionToOpen.empty() && !instrumentConnectionStrings.empty())
@@ -267,7 +298,14 @@ int main(int argc, char* argv[])
 
 		//Load a session on startup if requested
 		if(!sessionToOpen.empty())
-			g_mainWindow->SetStartupSession(sessionToOpen);
+		{
+			auto mode = MainWindow::STARTUP_SESSION_PROMPT;
+			if(reconnectSession)
+				mode = MainWindow::STARTUP_SESSION_RECONNECT;
+			else if(offlineSession)
+				mode = MainWindow::STARTUP_SESSION_OFFLINE;
+			g_mainWindow->SetStartupSession(sessionToOpen, mode);
+		}
 
 		//Render the main window once, so it can initialize a new empty session before we connect any instruments
 		SDL_Event startupEvent;

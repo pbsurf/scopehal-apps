@@ -123,6 +123,7 @@ MainWindow::MainWindow(shared_ptr<QueueHandle> queue, bool maximized, bool resto
 	, m_toolbarIconTheme(ICON_THEME_DARK)
 	, m_traceAlpha(0.75)
 	, m_persistenceDecay(0.0)
+	, m_startupSessionMode(STARTUP_SESSION_PROMPT)
 	, m_session(this)
 	, m_sessionClosing(true)	//reset a default session on the first frame after we start up
 	, m_fileLoadInProgress(false)
@@ -1919,6 +1920,15 @@ void MainWindow::ShowErrorPopup(const string& title, const string& msg)
 void MainWindow::RenderReconnectPopup()
 {
 	const char* title = "Open Session";
+
+	//If we were told what to do on the command line, don't ask
+	if( !m_startupSession.empty() && (m_startupSessionMode != STARTUP_SESSION_PROMPT) )
+	{
+		string path = m_startupSession;
+		m_startupSession = "";
+		DoOpenFile(path, m_startupSessionMode == STARTUP_SESSION_RECONNECT);
+		return;
+	}
 
 	if(!m_startupSession.empty())
 		ImGui::OpenPopup(title);
