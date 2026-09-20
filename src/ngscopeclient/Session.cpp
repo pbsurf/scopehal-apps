@@ -2000,9 +2000,13 @@ bool Session::PreLoadFunctionGenerator(int version, const YAML::Node& node, bool
 	auto transtype = node["transport"].as<string>();
 	auto driver = node["driver"].as<string>();
 
-	if(online)
+	//The demo generator is simulated, so there's nothing to reconnect to and we can always create it
+	//(even when loading offline, which isn't supported for function generators otherwise)
+	bool isDemo = (driver == "demofuncgen");
+
+	if(online || isDemo)
 	{
-		if(transtype == "null")
+		if( (transtype == "null") && !isDemo )
 		{
 			m_mainWindow->ShowErrorPopup(
 				"Unable to reconnect",
@@ -2012,7 +2016,7 @@ bool Session::PreLoadFunctionGenerator(int version, const YAML::Node& node, bool
 
 		else
 		{
-			//Create the PSU
+			//Create the generator
 			auto transport = CreateTransportForNode(node);
 
 			if(transport && transport->IsConnected())
