@@ -671,14 +671,21 @@ protected:
 		DRAG_STATE_BER_BOTH,
 		DRAG_STATE_PEAK_MARKER,
 		DRAG_STATE_Y_CURSOR0,
-		DRAG_STATE_Y_CURSOR1
+		DRAG_STATE_Y_CURSOR1,
+		DRAG_STATE_PAN
 	} m_dragState;
+
+	///@brief True if we moved the Y axis offset during the current DRAG_STATE_PAN
+	bool m_panDraggedY;
 
 	///@brief The stream currently being dragged (invalid if m_dragState != DRAG_STATE_CHANNEL)
 	StreamDescriptor m_dragStream;
 
 	void OnMouseWheelPlotArea(float delta, float delta_h);
 	void OnMouseWheelYAxis(float delta, float zoomBase = 0.9f);
+	void DragYAxisBy(float dy);
+	void CommitYAxisDrag();
+	bool CanPanVertically();
 	void OnPinchZoom(float delta, float delta_h);
 	void OnMouseUp();
 	void OnDragUpdate();

@@ -77,6 +77,7 @@ public:
 	void OnZoomInHorizontal(int64_t target, float step);
 	void OnZoomOutHorizontal(int64_t target, float step);
 	void OnPanHorizontal(float step);
+	void OnPanPixels(float dx);
 	void NavigateToTimestamp(
 		int64_t timestamp,
 		int64_t duration = 0,
@@ -165,6 +166,15 @@ public:
 
 	bool IsMouseOverAnyXCursor()
 	{ return IsMouseOverXCursor(0) || IsMouseOverXCursor(1); }
+
+	/**
+		@brief Returns true if dragging in the plot area of a waveform area can be used to pan the view
+
+		This is the case if there are no X axis cursors (which would be placed/moved by the drag), no marker
+		under the mouse, nothing else in the group being dragged, and the X axis isn't fixed (eye patterns).
+	 */
+	bool CanPanByDragging()
+	{ return (m_xAxisCursorMode == X_CURSOR_NONE) && !m_displayingEye && !m_mouseOverMarker && (m_dragState == DRAG_STATE_NONE); }
 
 	void AutofitHorizontal(float width);
 

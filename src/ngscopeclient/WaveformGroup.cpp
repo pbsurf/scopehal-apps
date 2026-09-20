@@ -1393,6 +1393,18 @@ void WaveformGroup::OnPanHorizontal(float step)
 }
 
 /**
+	@brief Pans the view by a number of pixels
+
+	@param dx	Distance to move the waveforms, in pixels (positive is to the right)
+ */
+void WaveformGroup::OnPanPixels(float dx)
+{
+	m_xAxisOffset -= PixelsToXAxisUnits(dx);
+
+	ClearPersistence();
+}
+
+/**
 	@brief Scrolls the group so the specified timestamp is visible
 
 	If the duration is nonzero:

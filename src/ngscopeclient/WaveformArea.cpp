@@ -365,6 +365,7 @@ WaveformArea::WaveformArea(StreamDescriptor stream, shared_ptr<WaveformGroup> gr
 	, m_pixelsPerYAxisUnit(1)
 	, m_yAxisUnit(stream.GetYAxisUnits())
 	, m_dragState(DRAG_STATE_NONE)
+	, m_panDraggedY(false)
 	, m_group(group)
 	, m_parent(parent)
 	, m_tLastMouseMove(GetTime())
@@ -804,7 +805,7 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 	if(first)
 	{
 		//Don't touch scale if we're dragging, since the dragged value is newer than the hardware value
-		if(m_dragState != DRAG_STATE_Y_AXIS)
+		if( (m_dragState != DRAG_STATE_Y_AXIS) && (m_dragState != DRAG_STATE_PAN) )
 			m_yAxisOffset = first.GetOffset();
 
 		m_pixelsPerYAxisUnit = unspacedHeightPerArea / first.GetVoltageRange();
@@ -863,6 +864,20 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 				else
 					OnMouseWheelPlotArea(wheel, wheel_h);
 			}
+
+			//Dragging on the plot pans, unless there's a cursor or something else to drag instead
+			if( ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+				(m_dragState == DRAG_STATE_NONE) &&
+				(m_yAxisCursorMode == Y_CURSOR_NONE) &&
+				m_group->CanPanByDragging() &&
+				!m_mouseOverButton &&
+				!m_mouseOverTriggerArrow &&
+				(ImGui::GetDragDropPayload() == nullptr) &&
+				!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) )
+			{
+				m_dragState = DRAG_STATE_PAN;
+				m_panDraggedY = false;
+			}
 		}
 
 		//Make targets for drag-and-drop
@@ -907,7 +922,14 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 
 	//Handle help messages
 	if(ImGui::IsItemHovered() && !m_mouseOverButton)
+	{
 		m_parent->AddStatusHelp("mouse_wheel", "Zoom horizontal axis");
+		if( (m_dragState == DRAG_STATE_PAN) ||
+			( (m_dragState == DRAG_STATE_NONE) && (m_yAxisCursorMode == Y_CURSOR_NONE) && m_group->CanPanByDragging() ) )
+		{
+			m_parent->AddStatusHelp("mouse_lmb_drag", "Pan");
+		}
+	}
 
 	//Cursor should now be at end of window
 	ImGui::SetCursorPos(ImVec2(cpos.x, cpos.y + unspacedHeightPerArea));
@@ -3138,7 +3160,7 @@ void WaveformArea::RenderYAxis(ImVec2 size, map<float, float>& gridmap, float vb
 
 	//If dragging the axis, immediately push changes if the channel is capable of high-rate offset changes
 	//(filter or scope that has opted into it)
-	if(m_dragState == DRAG_STATE_Y_AXIS)
+	if( (m_dragState == DRAG_STATE_Y_AXIS) || (m_dragState == DRAG_STATE_PAN) )
 	{
 		bool updated = false;
 
@@ -4620,10 +4642,12 @@ void WaveformArea::OnMouseUp()
 	{
 		case DRAG_STATE_Y_AXIS:
 			LogTrace("End dragging Y axis\n");
-			for(auto c : m_inputs)
-				c->m_sourceStream.SetOffset(m_yAxisOffset);
-			ClearPersistence();
-			m_parent->SetNeedRender();
+			CommitYAxisDrag();
+			break;
+
+		case DRAG_STATE_PAN:
+			if(m_panDraggedY)
+				CommitYAxisDrag();
 			break;
 
 		case DRAG_STATE_BER_LEVEL:
@@ -4722,6 +4746,48 @@ void WaveformArea::OnMouseUp()
 	m_dragState = DRAG_STATE_NONE;
 }
 
+/**
+	@brief Moves the Y axis offset by a number of pixels, as when dragging the Y axis or panning vertically
+ */
+void WaveformArea::DragYAxisBy(float dy)
+{
+	m_yAxisOffset -= PixelsToYAxisUnits(dy);
+
+	for(auto chan : m_inputs)
+	{
+		//Update filters and such instantly
+		auto stream = chan->m_sourceStream;
+		auto f = dynamic_cast<Filter*>(stream.m_channel);
+		if(f != nullptr)
+			stream.SetOffset(m_yAxisOffset);
+
+		//TODO: push to hardware at a controlled rate (after each trigger? fixed rate in Hz?)
+	}
+
+	m_parent->SetNeedRender();
+}
+
+/**
+	@brief Applies the current Y axis offset to all channels (at the end of a drag)
+ */
+void WaveformArea::CommitYAxisDrag()
+{
+	for(auto c : m_inputs)
+		c->m_sourceStream.SetOffset(m_yAxisOffset);
+	ClearPersistence();
+	m_parent->SetNeedRender();
+}
+
+/**
+	@brief Returns true if this area has a Y axis that can be moved (not an eye pattern or constellation)
+ */
+bool WaveformArea::CanPanVertically()
+{
+	if(GetFirstEyeStream() || GetFirstConstellationStream())
+		return false;
+	return static_cast<bool>(GetFirstAnalogOrDensityStream());
+}
+
 void WaveformArea::OnDragUpdate()
 {
 	//If mouse is not currently down, but we're still dragging, synthesize a mouse up event
@@ -4734,23 +4800,7 @@ void WaveformArea::OnDragUpdate()
 	switch(m_dragState)
 	{
 		case DRAG_STATE_Y_AXIS:
-			{
-				float dy = ImGui::GetIO().MouseDelta.y;
-				m_yAxisOffset -= PixelsToYAxisUnits(dy);
-
-				for(auto chan : m_inputs)
-				{
-					//Update filters and such instantly
-					auto stream = chan->m_sourceStream;
-					auto f = dynamic_cast<Filter*>(stream.m_channel);
-					if(f != nullptr)
-						stream.SetOffset(m_yAxisOffset);
-
-					//TODO: push to hardware at a controlled rate (after each trigger? fixed rate in Hz?)
-				}
-
-				m_parent->SetNeedRender();
-			}
+			DragYAxisBy(ImGui::GetIO().MouseDelta.y);
 			break;
 
 		case DRAG_STATE_BER_LEVEL:
@@ -4760,6 +4810,25 @@ void WaveformArea::OnDragUpdate()
 
 		case DRAG_STATE_TRIGGER_LEVEL:
 			//TODO: push to hardware at a controlled rate (after each trigger?)
+			break;
+
+		case DRAG_STATE_PAN:
+			{
+				//Use relative delta, not drag delta, since we update the offset every frame
+				auto delta = ImGui::GetIO().MouseDelta;
+				if(delta.x != 0)
+				{
+					m_group->OnPanPixels(delta.x);
+					m_parent->SetNeedRender();
+				}
+
+				//Vertical pan is the same as dragging the Y axis
+				if( (delta.y != 0) && CanPanVertically() )
+				{
+					DragYAxisBy(delta.y);
+					m_panDraggedY = true;
+				}
+			}
 			break;
 
 		case DRAG_STATE_PEAK_MARKER:
