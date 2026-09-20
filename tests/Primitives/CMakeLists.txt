@@ -8,6 +8,7 @@ add_executable(Primitives
 	DualFFT.cpp
 	EdgeDetection.cpp
 	IIOMock.cpp
+	IIOSDR.cpp
 	Sampling.cpp
 	UnitFormatting.cpp
 )
