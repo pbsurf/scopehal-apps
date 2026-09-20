@@ -365,6 +365,9 @@ WaveformArea::WaveformArea(StreamDescriptor stream, shared_ptr<WaveformGroup> gr
 	, m_pixelsPerYAxisUnit(1)
 	, m_yAxisUnit(stream.GetYAxisUnits())
 	, m_dragState(DRAG_STATE_NONE)
+	, m_zoomBoxStart(0, 0)
+	, m_plotPos(0, 0)
+	, m_plotSize(0, 0)
 	, m_panDraggedY(false)
 	, m_group(group)
 	, m_parent(parent)
@@ -832,6 +835,8 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 		csize.x -= yAxisWidthSpaced;
 
 		m_width = csize.x;
+		m_plotPos = pos;
+		m_plotSize = csize;
 
 		//Calculate midpoint of our plot
 		m_ymid = pos.y + unspacedHeightPerArea / 2;
@@ -865,8 +870,17 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 					OnMouseWheelPlotArea(wheel, wheel_h);
 			}
 
-			//Dragging on the plot pans, unless there's a cursor or something else to drag instead
+			//Ctrl+drag zooms to a box. This takes priority over everything below, including cursors.
 			if( ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+				ImGui::IsKeyDown(ImGuiMod_Ctrl) &&
+				CanZoomByDragging() )
+			{
+				m_dragState = DRAG_STATE_ZOOM_BOX;
+				m_zoomBoxStart = ImGui::GetMousePos();
+			}
+
+			//Dragging on the plot pans, unless there's a cursor or something else to drag instead
+			else if( ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
 				(m_dragState == DRAG_STATE_NONE) &&
 				(m_yAxisCursorMode == Y_CURSOR_NONE) &&
 				m_group->CanPanByDragging() &&
@@ -924,7 +938,12 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 	if(ImGui::IsItemHovered() && !m_mouseOverButton)
 	{
 		m_parent->AddStatusHelp("mouse_wheel", "Zoom horizontal axis");
-		if( (m_dragState == DRAG_STATE_PAN) ||
+		if( (m_dragState == DRAG_STATE_ZOOM_BOX) ||
+			( (m_dragState == DRAG_STATE_NONE) && ImGui::IsKeyDown(ImGuiMod_Ctrl) && CanZoomByDragging() ) )
+		{
+			m_parent->AddStatusHelp("mouse_lmb_drag", "Zoom to box");
+		}
+		else if( (m_dragState == DRAG_STATE_PAN) ||
 			( (m_dragState == DRAG_STATE_NONE) && (m_yAxisCursorMode == Y_CURSOR_NONE) && m_group->CanPanByDragging() ) )
 		{
 			m_parent->AddStatusHelp("mouse_lmb_drag", "Pan");
@@ -1057,6 +1076,7 @@ void WaveformArea::RenderYAxisCursors(ImVec2 pos, ImVec2 size, float yAxisWidth)
 	if( ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
 		(m_dragState == DRAG_STATE_NONE) &&
 		ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+		!ImGui::IsKeyDown(ImGuiMod_Ctrl) &&	//Ctrl+click is for zooming to a box, not placing cursors
 		!m_mouseOverButton &&
 		!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
 		!m_group->IsDraggingSomething() &&
@@ -3208,8 +3228,21 @@ void WaveformArea::RenderCursors(ImVec2 start, ImVec2 size)
 			draw_list->AddLine(ImVec2(start.x + dx, y), ImVec2(start.x + dx + dashSize, y), triggerColor);
 	}
 
-	//See if the waveform group is dragging a trigger
+	//Zoom box
 	auto mouse = ImGui::GetMousePos();
+	if(m_dragState == DRAG_STATE_ZOOM_BOX)
+	{
+		ImVec2 a(
+			std::clamp(m_zoomBoxStart.x, start.x, start.x + size.x),
+			std::clamp(m_zoomBoxStart.y, start.y, start.y + size.y));
+		ImVec2 b(
+			std::clamp(mouse.x, start.x, start.x + size.x),
+			std::clamp(mouse.y, start.y, start.y + size.y));
+		draw_list->AddRectFilled(a, b, IM_COL32(255, 255, 255, 32));
+		draw_list->AddRect(a, b, IM_COL32(255, 255, 255, 200));
+	}
+
+	//See if the waveform group is dragging a trigger
 	if(m_group->IsDraggingTrigger())
 	{
 		auto color = m_parent->GetSession().GetPreferences().GetColor("Appearance.Timeline.axis_color");
@@ -4653,6 +4686,10 @@ void WaveformArea::OnMouseUp()
 				CommitYAxisDrag();
 			break;
 
+		case DRAG_STATE_ZOOM_BOX:
+			ApplyZoomBox();
+			break;
+
 		case DRAG_STATE_BER_LEVEL:
 			{
 				float ignored;
@@ -4782,6 +4819,76 @@ void WaveformArea::CommitYAxisDrag()
 }
 
 /**
+	@brief Returns true if a Ctrl+drag in the plot area can start a zoom to box
+ */
+bool WaveformArea::CanZoomByDragging()
+{
+	return (m_dragState == DRAG_STATE_NONE) &&
+		m_group->CanZoomByDragging() &&
+		!m_mouseOverButton &&
+		!m_mouseOverTriggerArrow &&
+		!GetFirstEyeStream() &&
+		!GetFirstConstellationStream() &&
+		(ImGui::GetDragDropPayload() == nullptr) &&
+		!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+}
+
+/**
+	@brief Zooms the X and Y axes to the box that was dragged out (at the end of a DRAG_STATE_ZOOM_BOX drag)
+
+	The X axis is shared by the whole group, the Y axis (and the instrument settings behind it) only by this plot.
+	If the box is very thin in one direction, only the other axis is zoomed.
+ */
+void WaveformArea::ApplyZoomBox()
+{
+	//Clamp the box to the plot
+	auto mouse = ImGui::GetMousePos();
+	float xa = std::clamp(m_zoomBoxStart.x, m_plotPos.x, m_plotPos.x + m_plotSize.x);
+	float xb = std::clamp(mouse.x, m_plotPos.x, m_plotPos.x + m_plotSize.x);
+	float ya = std::clamp(m_zoomBoxStart.y, m_plotPos.y, m_plotPos.y + m_plotSize.y);
+	float yb = std::clamp(mouse.y, m_plotPos.y, m_plotPos.y + m_plotSize.y);
+	float left = std::min(xa, xb);
+	float right = std::max(xa, xb);
+	float top = std::min(ya, yb);
+	float bottom = std::max(ya, yb);
+
+	//Ignore accidental drags
+	float minSize = ImGui::GetFontSize() * 0.5f;
+	bool zoomX = (right - left) >= minSize;
+	bool zoomY = ((bottom - top) >= minSize) && CanPanVertically();
+	if(!zoomX && !zoomY)
+		return;
+
+	if(zoomX)
+	{
+		LogTrace("Zooming X axis to box\n");
+		m_group->ZoomToXRange(
+			m_group->XPositionToXAxisUnits(left),
+			m_group->XPositionToXAxisUnits(right),
+			m_plotSize.x);
+	}
+
+	if(zoomY)
+	{
+		LogTrace("Zooming Y axis to box\n");
+
+		//Same math as autofit: center the range on the box
+		float vtop = YPositionToYAxisUnits(top);
+		float vbottom = YPositionToYAxisUnits(bottom);
+		float mid = (vtop + vbottom) / 2;
+		float range = vtop - vbottom;
+		for(auto& c : m_inputs)
+		{
+			c->m_sourceStream.SetOffset(-mid);
+			c->m_sourceStream.SetVoltageRange(range);
+		}
+	}
+
+	ClearPersistence();
+	m_parent->SetNeedRender();
+}
+
+/**
 	@brief Returns true if this area has a Y axis that can be moved (not an eye pattern or constellation)
  */
 bool WaveformArea::CanPanVertically()
@@ -4832,6 +4939,12 @@ void WaveformArea::OnDragUpdate()
 					m_panDraggedY = true;
 				}
 			}
+			break;
+
+		case DRAG_STATE_ZOOM_BOX:
+			//Escape cancels the zoom
+			if(ImGui::IsKeyPressed(ImGuiKey_Escape))
+				m_dragState = DRAG_STATE_NONE;
 			break;
 
 		case DRAG_STATE_PEAK_MARKER:

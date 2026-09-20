@@ -176,7 +176,18 @@ public:
 	bool CanPanByDragging()
 	{ return (m_xAxisCursorMode == X_CURSOR_NONE) && !m_displayingEye && !m_mouseOverMarker && (m_dragState == DRAG_STATE_NONE); }
 
+	/**
+		@brief Returns true if dragging in the plot area of a waveform area can be used to zoom to a box
+
+		Unlike panning this is allowed with X axis cursors present (the zoom needs Ctrl held, which suppresses
+		placing cursors), but not if a marker is under the mouse, something else in the group is being dragged,
+		or the X axis is fixed (eye patterns).
+	 */
+	bool CanZoomByDragging()
+	{ return !m_displayingEye && !m_mouseOverMarker && (m_dragState == DRAG_STATE_NONE); }
+
 	void AutofitHorizontal(float width);
+	void ZoomToXRange(int64_t start, int64_t end, float width);
 
 protected:
 	void RenderTimeline(float width, float height);

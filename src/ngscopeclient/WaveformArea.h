@@ -672,8 +672,16 @@ protected:
 		DRAG_STATE_PEAK_MARKER,
 		DRAG_STATE_Y_CURSOR0,
 		DRAG_STATE_Y_CURSOR1,
-		DRAG_STATE_PAN
+		DRAG_STATE_PAN,
+		DRAG_STATE_ZOOM_BOX
 	} m_dragState;
+
+	///@brief Where the mouse went down when in DRAG_STATE_ZOOM_BOX (screen coordinates)
+	ImVec2 m_zoomBoxStart;
+
+	///@brief Position and size of the plot area on screen (excluding the Y axis), as of the last render
+	ImVec2 m_plotPos;
+	ImVec2 m_plotSize;
 
 	///@brief True if we moved the Y axis offset during the current DRAG_STATE_PAN
 	bool m_panDraggedY;
@@ -686,6 +694,8 @@ protected:
 	void DragYAxisBy(float dy);
 	void CommitYAxisDrag();
 	bool CanPanVertically();
+	bool CanZoomByDragging();
+	void ApplyZoomBox();
 	void OnPinchZoom(float delta, float delta_h);
 	void OnMouseUp();
 	void OnDragUpdate();

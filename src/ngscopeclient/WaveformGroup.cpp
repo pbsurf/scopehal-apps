@@ -855,9 +855,11 @@ void WaveformGroup::RenderXAxisCursors(ImVec2 pos, ImVec2 size)
 
 	//If not currently dragging, a click places cursor 0 and starts dragging cursor 1 (if enabled)
 	//Don't process this if a popup is open
+	//Ctrl+click is for zooming to a box, not placing cursors
 	if( ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
 		(m_dragState == DRAG_STATE_NONE) &&
 		ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+		!ImGui::IsKeyDown(ImGuiMod_Ctrl) &&
 		!IsMouseOverButtonInWaveformArea() &&
 		!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
 		!m_mouseOverMarker &&
@@ -1558,6 +1560,23 @@ YAML::Node WaveformGroup::SerializeConfiguration(IDTable& table)
 
 	return node;
 
+}
+
+/**
+	@brief Zooms so the specified range of X axis units fills the plot
+
+	@param start	Timestamp (or other X axis value) for the left edge of the plot
+	@param end		Timestamp for the right edge of the plot
+	@param width	Width of the plot, in pixels
+ */
+void WaveformGroup::ZoomToXRange(int64_t start, int64_t end, float width)
+{
+	if(end <= start)
+		return;
+
+	m_pixelsPerXUnit = width / (end - start);
+	m_xAxisOffset = start;
+	ClearPersistence();
 }
 
 void WaveformGroup::AutofitHorizontal(float width)
