@@ -1593,7 +1593,8 @@ void StreamBrowserDialog::renderChannelNode(
 	}
 	else if(awg && awgchan)
 	{
-		renderProps = m_session->GetFunctionGeneratorState(awg)->m_channelActive[channelIndex];
+		//Always show the properties, even if the output is off, so the channel can be set up before turning it on
+		renderProps = true;
 	}
 	else if(dmm && dmmchan)
 	{
