@@ -992,17 +992,18 @@ void WaveformGroup::RenderTimeline(float width, float height)
 		if(wheel != 0)
 			OnMouseWheel(wheel);
 
+		//Autoscale on middle mouse, or double click / double tap if there's no middle button
+		//(checked before drag start, so the second click of a double click doesn't begin a drag)
+		if(ImGui::IsMouseClicked(ImGuiMouseButton_Middle) || ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+		{
+			AutofitHorizontal(width);
+		}
+
 		//Start dragging
-		if(ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+		else if(ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 		{
 			if(!m_displayingEye)
 				m_dragState = DRAG_STATE_TIMELINE;
-		}
-
-		//Autoscale on middle mouse
-		if(ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
-		{
-			AutofitHorizontal(width);
 		}
 	}
 
@@ -1561,7 +1562,7 @@ YAML::Node WaveformGroup::SerializeConfiguration(IDTable& table)
 
 void WaveformGroup::AutofitHorizontal(float width)
 {
-	LogTrace("middle mouse autoscale\n");
+	LogTrace("horizontal autoscale\n");
 
 	//Find beginning and end of all waveforms in the group
 	int64_t start = INT64_MAX;

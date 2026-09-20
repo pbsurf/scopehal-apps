@@ -4,7 +4,7 @@ Each plot in ngscopeclient has its own Y axis, shared by all waveforms within th
 
   * Drag up and down to adjust DC offset
   * Scroll in and out to adjust gain
-  * Middle-click to auto fit gain and offset to min/max of the current waveform
+  * Middle-click (or double-click/double-tap) to auto fit gain and offset to min/max of the current waveform
 
 This will simultaneously control the frontend configuration for all physical instrument channels in the same plot, as well as adjusting the display position/scale of filters.
 

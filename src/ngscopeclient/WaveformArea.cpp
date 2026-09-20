@@ -3142,8 +3142,14 @@ void WaveformArea::RenderYAxis(ImVec2 size, map<float, float>& gridmap, float vb
 
 	if(ImGui::IsItemHovered() && !m_mouseOverTriggerArrow && canDragYAxis && (m_dragState == DRAG_STATE_NONE))
 	{
+		//Autoscale on middle mouse, or double click / double tap if there's no middle button
+		//(checked before drag start, so the second click of a double click doesn't begin a drag, which would
+		//overwrite the new scale with the pre-autofit values when it ends)
+		if(ImGui::IsMouseClicked(ImGuiMouseButton_Middle) || ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+			AutofitVertical();
+
 		//Start dragging
-		if(ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+		else if(ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 		{
 			LogTrace("Start dragging Y axis\n");
 			m_dragState = DRAG_STATE_Y_AXIS;
@@ -3153,9 +3159,6 @@ void WaveformArea::RenderYAxis(ImVec2 size, map<float, float>& gridmap, float vb
 			if(tutorial && (tutorial->GetCurrentStep() == TutorialWizard::TUTORIAL_05_YAXIS) )
 				tutorial->EnableNextStep();
 		}
-
-		if(ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
-			AutofitVertical();
 	}
 
 	//If dragging the axis, immediately push changes if the channel is capable of high-rate offset changes
