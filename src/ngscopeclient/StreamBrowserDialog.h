@@ -118,6 +118,22 @@ public:
 	float m_amplitude;
 };
 
+/**
+	@brief Text being edited for one transmit path of an SDR
+ */
+class StreamBrowserTxInfo
+{
+public:
+	StreamBrowserTxInfo()
+		: m_atten(0)
+	{}
+
+	std::string m_attenText;
+	float m_atten;
+
+	std::vector<StreamBrowserTxToneInfo> m_tones;
+};
+
 class StreamBrowserDialog : public Dialog
 {
 public:
@@ -212,8 +228,8 @@ protected:
 	///@brief Map of instruments to timebase settings
 	std::map<std::shared_ptr<Instrument>, std::shared_ptr<StreamBrowserTimebaseInfo> > m_timebaseConfig;
 
-	///@brief Map of (SDR, transmit path) to the tone settings being edited
-	std::map<std::pair<Instrument*, size_t>, std::vector<StreamBrowserTxToneInfo> > m_txToneConfig;
+	///@brief Map of (SDR, transmit path) to the transmit settings being edited
+	std::map<std::pair<Instrument*, size_t>, StreamBrowserTxInfo> m_txConfig;
 
 	///@brief Reference to currently dragged StreamGroupDesciptor
 	std::shared_ptr<StreamGroupDescriptor> m_streamGroupDesciptor;

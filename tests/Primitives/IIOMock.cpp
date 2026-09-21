@@ -227,9 +227,9 @@ TEST_CASE("IIO_MockAvailableAttributes")
 	auto ctx = IIOContext::Open("mock:ad9363");
 	REQUIRE(ctx != nullptr);
 
-	//Ranges are published for the RX path (and only the RX path)
+	//Gain ranges are published for both the RX path and the TX path (where it's an attenuation)
 	REQUIRE(ctx->HasChannelAttr(phy, "voltage0", false, "hardwaregain_available"));
-	REQUIRE(!ctx->HasChannelAttr(phy, "voltage0", true, "hardwaregain_available"));
+	REQUIRE(ctx->HasChannelAttr(phy, "voltage0", true, "hardwaregain_available"));
 	REQUIRE(!ctx->HasChannelAttr(phy, "voltage0", false, "nonexistent"));
 	REQUIRE(!ctx->HasChannelAttr(phy, "voltage7", false, "hardwaregain"));
 	REQUIRE(ctx->HasChannelAttr(phy, "RX_LO", true, "frequency_available"));
@@ -237,6 +237,8 @@ TEST_CASE("IIO_MockAvailableAttributes")
 	string tmp;
 	REQUIRE(ctx->ReadChannelAttr(phy, "voltage0", false, "hardwaregain_available", tmp));
 	REQUIRE(tmp == "[-1 1 73]");
+	REQUIRE(ctx->ReadChannelAttr(phy, "voltage0", true, "hardwaregain_available", tmp));
+	REQUIRE(tmp == "[-89.75 0.25 0]");
 	REQUIRE(ctx->ReadChannelAttr(phy, "voltage0", false, "gain_control_mode_available", tmp));
 	REQUIRE(tmp == "manual fast_attack slow_attack hybrid");
 	REQUIRE(ctx->ReadChannelAttr(phy, "altvoltage0", true, "frequency_available", tmp));

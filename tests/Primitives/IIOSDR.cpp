@@ -667,6 +667,65 @@ TEST_CASE("IIOSDR_Transmit")
 	REQUIRE(sdr->GetTxToneFrequency(0, 2) == 0);
 }
 
+TEST_CASE("IIOSDR_TransmitAttenuation")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9361", ctx);
+
+	//The radio reports a (negative) gain, we call it a positive attenuation. We adopt what it's doing.
+	REQUIRE(sdr->GetTxAttenuation(0) == 10);
+	REQUIRE(sdr->GetTxAttenuation(1) == 10);
+	auto range = sdr->GetTxAttenuationRange(0);
+	REQUIRE(range.first == 0);
+	REQUIRE(range.second == 89.75f);
+
+	//Each path is independent
+	sdr->SetTxAttenuation(1, 20.5);
+	REQUIRE(sdr->GetTxAttenuation(1) == 20.5);
+	double gain;
+	REQUIRE(ctx->ReadChannelAttrDouble(phy, "voltage1", true, "hardwaregain", gain));
+	REQUIRE(gain == -10);
+	sdr->BackgroundProcessing();
+	REQUIRE(ctx->ReadChannelAttrDouble(phy, "voltage1", true, "hardwaregain", gain));
+	REQUIRE(gain == -20.5);
+	REQUIRE(ctx->ReadChannelAttrDouble(phy, "voltage0", true, "hardwaregain", gain));
+	REQUIRE(gain == -10);
+	REQUIRE(sdr->GetTxAttenuation(0) == 10);
+
+	//The radio rounds to 0.25 dB and we report what it did
+	sdr->SetTxAttenuation(0, 3.1);
+	sdr->BackgroundProcessing();
+	REQUIRE(sdr->GetTxAttenuation(0) == 3);
+
+	//Out of range values are clamped
+	sdr->SetTxAttenuation(0, -5);
+	REQUIRE(sdr->GetTxAttenuation(0) == 0);
+	sdr->SetTxAttenuation(0, 200);
+	REQUIRE(sdr->GetTxAttenuation(0) == 89.75f);
+
+	//Bad index is ignored
+	sdr->SetTxAttenuation(2, 5);
+	REQUIRE(sdr->GetTxAttenuation(2) == 0);
+
+	//Saved in sessions
+	sdr->SetTxAttenuation(0, 6);
+	sdr->SetTxAttenuation(1, 12.25);
+	sdr->BackgroundProcessing();
+	IDTable table;
+	auto node = sdr->SerializeConfiguration(table);
+
+	IIOContext* ctx2;
+	auto sdr2 = MakeSDR("mock:ad9361", ctx2);
+	REQUIRE(sdr2->GetTxAttenuation(0) == 10);
+	IDTable idmap;
+	sdr2->LoadConfiguration(2, node, idmap);
+	sdr2->BackgroundProcessing();
+	REQUIRE(sdr2->GetTxAttenuation(0) == 6);
+	REQUIRE(sdr2->GetTxAttenuation(1) == 12.25);
+	REQUIRE(ctx2->ReadChannelAttrDouble(phy, "voltage1", true, "hardwaregain", gain));
+	REQUIRE(gain == -12.25);
+}
+
 TEST_CASE("IIOSDR_TransmitLO")
 {
 	IIOContext* ctx;

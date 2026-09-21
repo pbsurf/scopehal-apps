@@ -17,8 +17,8 @@ This is a fork of [ngscopeclient/scopehal-apps](https://github.com/ngscopeclient
 * A simulated radio (use the path `mock:` or `mock:ad9361`) for development without hardware. It has been tested only against
   this simulation and **not yet against a real radio**.
 * Receive gain mode and gain are shown in the stream browser in place of attenuation for radios that have gain control.
-* Transmit paths of radios with a DDS core are shown in the stream browser, with two tones per path with frequency,
-  amplitude and on/off controls, and a TX LO setting shared by all paths.
+* Transmit paths of radios with a DDS core are shown in the stream browser, with an attenuation setting and two tones
+  per path with frequency, amplitude and on/off controls, and a TX LO setting shared by all paths.
 * New Complex FFT filter for I/Q data.
 
 **User interface**

@@ -812,8 +812,27 @@ void StreamBrowserDialog::renderSdrTxProperties(shared_ptr<SCPISDR> sdr, SDRTran
 	size_t ntones = sdr->GetTxToneCount(tx);
 	auto dwidth = ImGui::GetFontSize() * 6;
 
-	auto& tones = m_txToneConfig[pair<Instrument*, size_t>(sdr.get(), tx)];
+	auto& txinfo = m_txConfig[pair<Instrument*, size_t>(sdr.get(), tx)];
+	auto& tones = txinfo.m_tones;
 	tones.resize(ntones);
+
+	//Attenuation applies to the whole path
+	Unit db(Unit::UNIT_DB);
+	auto atten = sdr->GetTxAttenuation(tx);
+	if(atten != txinfo.m_atten)
+	{
+		txinfo.m_atten = atten;
+		txinfo.m_attenText = db.PrettyPrint(atten);
+	}
+	auto attenRange = sdr->GetTxAttenuationRange(tx);
+	char attenHelp[128];
+	snprintf(attenHelp, sizeof(attenHelp),
+		"Attenuation of the transmit path, from %.0f to %.0f dB. More attenuation means less output power.",
+		attenRange.first, attenRange.second);
+	if(renderEditableProperty(dwidth, "Attenuation", txinfo.m_attenText, txinfo.m_atten, db, attenHelp))
+	{
+		sdr->SetTxAttenuation(tx, txinfo.m_atten);
+	}
 
 	for(size_t j=0; j<ntones; j++)
 	{
@@ -2458,7 +2477,7 @@ void StreamBrowserDialog::renderFilterNode(Filter* filter)
 void StreamBrowserDialog::FlushConfigCache()
 {
 	m_timebaseConfig.clear();
-	m_txToneConfig.clear();
+	m_txConfig.clear();
 }
 
 /**
