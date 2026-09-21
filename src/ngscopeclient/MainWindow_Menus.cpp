@@ -283,6 +283,47 @@ void MainWindow::AddMenu()
 }
 
 /**
+	@brief Splits an entry of the recent instrument list into its fields
+
+	Entries look like "nickname:driver:transport:path". The path can contain colons (ip:192.168.2.1), and it can be
+	empty or end in a colon (the "mock:" and "local:" IIO paths), so this can't use explode() which drops empty fields.
+
+	@param s			Entry from the recent instrument list
+	@param nick			Nickname of the instrument
+	@param driver		Driver name
+	@param transport	Transport name
+	@param path			Transport path, everything after the third colon (may be empty)
+
+	@return				True if the entry is well formed
+ */
+static bool ParseRecentInstrument(const string& s, string& nick, string& driver, string& transport, string& path)
+{
+	auto c1 = s.find(':');
+	auto c2 = (c1 == string::npos) ? string::npos : s.find(':', c1 + 1);
+	if(c2 == string::npos)
+		return false;
+	auto c3 = s.find(':', c2 + 1);
+
+	nick = s.substr(0, c1);
+	driver = s.substr(c1 + 1, c2 - c1 - 1);
+	if(c3 == string::npos)
+	{
+		//No path at all is only allowed for the null transport
+		transport = s.substr(c2 + 1);
+		path = "";
+		if(transport != "null")
+			return false;
+	}
+	else
+	{
+		transport = s.substr(c2 + 1, c3 - c2 - 1);
+		path = s.substr(c3 + 1);
+	}
+
+	return !nick.empty() && !driver.empty() && !transport.empty();
+}
+
+/**
 	@brief Run the Add | (instrument type) submenu
  */
 void MainWindow::DoAddSubMenu(
@@ -328,35 +369,18 @@ void MainWindow::DoAddSubMenu(
 			auto cstrings = reverseMap[t];
 			for(auto cstring : cstrings)
 			{
-				auto fields = explode(cstring, ':');
-
 				//make sure it's well formed
-				if(fields.size() < 4)
-				{
-					//Special case: null transport allows 3 fields
-					if( (fields.size() == 3) && (fields[2] == "null") )
-					{}
-
-					else
-						continue;
-				}
-
-				auto nick = fields[0];
-				auto drivername = fields[1];
-				auto transname = fields[2];
+				string nick;
+				string drivername;
+				string transname;
+				string path;
+				if(!ParseRecentInstrument(cstring, nick, drivername, transname, path))
+					continue;
 
 				if(driverset.find(drivername) != driverset.end())
 				{
 					if(ImGui::MenuItem(nick.c_str()))
 					{
-						string path;
-						if(fields.size() >= 4)
-						{
-							path = fields[3];
-							for(size_t j=4; j<fields.size(); j++)
-								path = path + ":" + fields[j];
-						}
-
 						bool success = true;
 						auto transport = MakeTransport(transname, path);
 						if(transport != nullptr)
