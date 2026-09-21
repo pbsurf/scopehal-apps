@@ -111,6 +111,9 @@ StreamBrowserTimebaseInfo::StreamBrowserTimebaseInfo(shared_ptr<Oscilloscope> sc
 	else
 		m_integrationTime = 0;
 
+	//Transmit LO. This is filled in when it's rendered since it can change under us.
+	m_txLo = 0;
+
 	m_adcmode = scope->GetADCMode(0);
 	m_adcmodeNames = scope->GetADCModeNames(0);
 }
@@ -795,6 +798,75 @@ void StreamBrowserDialog::renderDmmProperties(std::shared_ptr<Multimeter> dmm, M
 }
 
 /**
+	@brief Renders the properties of a transmit path of an SDR
+
+	@param sdr		The radio
+	@param txchan	The transmit channel to render
+ */
+void StreamBrowserDialog::renderSdrTxProperties(shared_ptr<SCPISDR> sdr, SDRTransmitChannel* txchan)
+{
+	Unit hz(Unit::UNIT_HZ);
+	Unit percent(Unit::UNIT_PERCENT);
+
+	size_t tx = txchan->GetTxIndex();
+	size_t ntones = sdr->GetTxToneCount(tx);
+	auto dwidth = ImGui::GetFontSize() * 6;
+
+	auto& tones = m_txToneConfig[pair<Instrument*, size_t>(sdr.get(), tx)];
+	tones.resize(ntones);
+
+	for(size_t j=0; j<ntones; j++)
+	{
+		ImGui::PushID(j);
+		auto& info = tones[j];
+
+		//Check if anything changed under us (the radio may not be able to do exactly what we asked for)
+		auto freq = sdr->GetTxToneFrequency(tx, j);
+		if(freq != info.m_freq)
+		{
+			info.m_freq = freq;
+			info.m_freqText = hz.PrettyPrintInt64(freq);
+		}
+		auto amplitude = sdr->GetTxToneAmplitude(tx, j);
+		if(amplitude != info.m_amplitude)
+		{
+			info.m_amplitude = amplitude;
+			info.m_amplitudeText = percent.PrettyPrint(amplitude);
+		}
+
+		ImGui::Text("Tone %zu", j+1);
+		startBadgeLine();
+		bool enabled = sdr->IsTxToneEnabled(tx, j);
+		if(renderOnOffToggle("##toneEnable", true, enabled))
+			sdr->SetTxToneEnabled(tx, j, enabled);
+
+		if(renderEditableProperty(
+			dwidth,
+			"Frequency",
+			info.m_freqText,
+			info.m_freq,
+			hz,
+			"Frequency of the tone relative to the TX LO. Negative frequencies are below the LO."))
+		{
+			sdr->SetTxToneFrequency(tx, j, info.m_freq);
+		}
+
+		if(renderEditableProperty(
+			dwidth,
+			"Amplitude",
+			info.m_amplitudeText,
+			info.m_amplitude,
+			percent,
+			"Amplitude of the tone as a percentage of the full scale of the transmit DAC."))
+		{
+			sdr->SetTxToneAmplitude(tx, j, info.m_amplitude);
+		}
+
+		ImGui::PopID();
+	}
+}
+
+/**
    @brief Render AWG channel properties
 
    @param awg the AWG to render channel properties for
@@ -1390,6 +1462,34 @@ void StreamBrowserDialog::DoFrequencySettings(shared_ptr<Oscilloscope> scope)
 		p->m_startText = hz.PrettyPrint(p->m_start);
 		p->m_endText = hz.PrettyPrint(p->m_end);
 	}
+
+	//Transmit LO, if we have a transmitter (it's shared by all transmit paths)
+	auto sdr = dynamic_pointer_cast<SCPISDR>(scope);
+	if(sdr && (sdr->GetTxChannelCount() > 0))
+	{
+		//Check if it changed under us
+		auto txLo = sdr->GetTxLOFrequency();
+		if(txLo != p->m_txLo)
+		{
+			p->m_txLo = txLo;
+			p->m_txLoText = hz.PrettyPrintInt64(txLo);
+		}
+
+		if(renderEditableProperty(
+			width,
+			"TX LO",
+			p->m_txLoText,
+			p->m_txLo,
+			hz,
+			"Local oscillator frequency of the transmitters. This is shared by all transmit paths."))
+		{
+			sdr->SetTxLOFrequency(p->m_txLo);
+
+			//Update with the value the driver settled on
+			p->m_txLo = sdr->GetTxLOFrequency();
+			p->m_txLoText = hz.PrettyPrintInt64(p->m_txLo);
+		}
+	}
 }
 void StreamBrowserDialog::DoSpectrometerSettings(shared_ptr<SCPISpectrometer> spec)
 {
@@ -1579,6 +1679,8 @@ void StreamBrowserDialog::renderChannelNode(
 	auto awgchan = dynamic_cast<FunctionGeneratorChannel *>(channel);
 	auto dmmchan = dynamic_cast<MultimeterChannel *>(channel);
 	auto vioout = dynamic_cast<VIOOutputChannel*>(channel);
+	auto sdrtxchan = dynamic_cast<SDRTransmitChannel*>(channel);
+	auto sdr = std::dynamic_pointer_cast<SCPISDR>(instrument);
 	bool renderProps = false;
 	if (scopechan)
 	{
@@ -1600,6 +1702,11 @@ void StreamBrowserDialog::renderChannelNode(
 	else if(dmm && dmmchan)
 	{
 		renderProps = m_session->GetDmmState(dmm)->m_started;
+	}
+	else if(sdr && sdrtxchan)
+	{
+		//Always show the properties, the tones can be set up before the output is enabled
+		renderProps = true;
 	}
 
 	bool hasChildren = !singleStream || renderProps;
@@ -1828,6 +1935,12 @@ void StreamBrowserDialog::renderChannelNode(
 		{
 			BeginBlock("awgparams");
 			renderAwgProperties(awg, awgchan);
+			EndBlock();
+		}
+		else if(sdr && sdrtxchan)
+		{
+			BeginBlock("sdr_tx_params");
+			renderSdrTxProperties(sdr, sdrtxchan);
 			EndBlock();
 		}
 		else if(dmm && dmmchan)
@@ -2345,6 +2458,7 @@ void StreamBrowserDialog::renderFilterNode(Filter* filter)
 void StreamBrowserDialog::FlushConfigCache()
 {
 	m_timebaseConfig.clear();
+	m_txToneConfig.clear();
 }
 
 /**

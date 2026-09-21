@@ -87,6 +87,10 @@ public:
 	std::string m_endText;
 	double m_end;
 
+	//Transmit LO (SDRs with a transmitter)
+	std::string m_txLoText;
+	int64_t m_txLo;
+
 	//Spectrometer controls
 	std::string m_integrationText;
 	double m_integrationTime;
@@ -94,6 +98,24 @@ public:
 	//ADC mode controls
 	std::vector<std::string> m_adcmodeNames;
 	int m_adcmode;
+};
+
+/**
+	@brief Text being edited for one tone of a transmitting SDR
+ */
+class StreamBrowserTxToneInfo
+{
+public:
+	StreamBrowserTxToneInfo()
+		: m_freq(0)
+		, m_amplitude(0)
+	{}
+
+	std::string m_freqText;
+	int64_t m_freq;
+
+	std::string m_amplitudeText;
+	float m_amplitude;
 };
 
 class StreamBrowserDialog : public Dialog
@@ -158,6 +180,7 @@ protected:
 	bool renderDownloadProgress(std::shared_ptr<Instrument> inst, InstrumentChannel *chan, bool isLast);
 	bool renderPsuRows(bool isVoltage, bool cc, PowerSupplyChannel* chan, std::string& currentValue, float& committedValue, std::string& measuredValue, bool &clicked, bool &hovered);
 	void renderAwgProperties(std::shared_ptr<FunctionGenerator> awg, FunctionGeneratorChannel* awgchan);
+	void renderSdrTxProperties(std::shared_ptr<SCPISDR> sdr, SDRTransmitChannel* txchan);
 	void renderDmmProperties(std::shared_ptr<Multimeter> dmm, MultimeterChannel* dmmchan, bool isMain, bool &clicked, bool &hovered);
 
 	// Rendering of an instrument node
@@ -188,6 +211,9 @@ protected:
 
 	///@brief Map of instruments to timebase settings
 	std::map<std::shared_ptr<Instrument>, std::shared_ptr<StreamBrowserTimebaseInfo> > m_timebaseConfig;
+
+	///@brief Map of (SDR, transmit path) to the tone settings being edited
+	std::map<std::pair<Instrument*, size_t>, std::vector<StreamBrowserTxToneInfo> > m_txToneConfig;
 
 	///@brief Reference to currently dragged StreamGroupDesciptor
 	std::shared_ptr<StreamGroupDescriptor> m_streamGroupDesciptor;

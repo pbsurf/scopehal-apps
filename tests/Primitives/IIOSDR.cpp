@@ -107,13 +107,20 @@ TEST_CASE("IIOSDR_Creation")
 	REQUIRE(sdr->GetTransportName() == "iio");
 	REQUIRE(sdr->GetTransportConnectionString() == "mock:ad9363");
 
-	//1R1T, so one complex RX channel with I, Q, and a center frequency scalar
-	REQUIRE(sdr->GetChannelCount() == 1);
+	//1R1T, so one complex RX channel with I, Q, and a center frequency scalar, then one transmit channel
+	REQUIRE(sdr->GetChannelCount() == 2);
 	auto chan = dynamic_cast<ComplexChannel*>(sdr->GetChannel(0));
 	REQUIRE(chan != nullptr);
 	REQUIRE(chan->GetHwname() == "RX1");
 	REQUIRE(chan->GetStreamCount() == 3);
 	REQUIRE(sdr->IsChannelEnabled(0));
+	auto txchan = dynamic_cast<SDRTransmitChannel*>(sdr->GetChannel(1));
+	REQUIRE(txchan != nullptr);
+	REQUIRE(txchan->GetHwname() == "TX1");
+	REQUIRE(txchan->GetStreamCount() == 0);
+	REQUIRE(txchan->GetTxIndex() == 0);
+	REQUIRE(sdr->GetInstrumentTypesForChannel(0) == Instrument::INST_OSCILLOSCOPE);
+	REQUIRE(sdr->GetInstrumentTypesForChannel(1) == Instrument::INST_RF_GEN);
 
 	REQUIRE(sdr->HasFrequencyControls());
 	REQUIRE(sdr->HasTimebaseControls());
@@ -126,8 +133,10 @@ TEST_CASE("IIOSDR_Creation")
 
 	//Bigger radio has two
 	auto sdr2 = MakeSDR("mock:ad9361", ctx);
-	REQUIRE(sdr2->GetChannelCount() == 2);
+	REQUIRE(sdr2->GetChannelCount() == 4);
 	REQUIRE(sdr2->GetChannel(1)->GetHwname() == "RX2");
+	REQUIRE(sdr2->GetChannel(2)->GetHwname() == "TX1");
+	REQUIRE(sdr2->GetChannel(3)->GetHwname() == "TX2");
 	REQUIRE(sdr2->IsChannelEnabled(0));
 	REQUIRE(!sdr2->IsChannelEnabled(1));
 
@@ -551,6 +560,208 @@ TEST_CASE("IIOSDR_Scan")
 
 	//Endpoint enumeration for the add instrument dialog is the same list
 	REQUIRE(SCPITransport::EnumEndpoints("iio").size() == IIOContext::Scan().size());
+}
+
+
+/**
+	@brief Reads the state of a DDS in the simulated radio
+ */
+static void ReadDDS(IIOContext* ctx, const string& name, int64_t& freq, double& scale, int64_t& phase, int64_t& raw)
+{
+	const char* dds = "cf-ad9361-dds-core-lpc";
+	REQUIRE(ctx->ReadChannelAttrInt(dds, name, true, "frequency", freq));
+	REQUIRE(ctx->ReadChannelAttrDouble(dds, name, true, "scale", scale));
+	REQUIRE(ctx->ReadChannelAttrInt(dds, name, true, "phase", phase));
+	REQUIRE(ctx->ReadChannelAttrInt(dds, name, true, "raw", raw));
+}
+
+TEST_CASE("IIOSDR_Transmit")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9361", ctx);
+
+	REQUIRE(sdr->GetTxChannelCount() == 2);
+	REQUIRE(sdr->GetTxToneCount(0) == 2);
+	REQUIRE(sdr->GetTxToneCount(1) == 2);
+	REQUIRE(sdr->GetTxToneCount(2) == 0);
+
+	//We adopt what the DDS is doing: tone 1 running at 1 MHz and 25%, tone 2 off
+	REQUIRE(sdr->GetTxLOFrequency() == 2400000000);
+	REQUIRE(sdr->IsTxToneEnabled(0, 0));
+	REQUIRE(sdr->GetTxToneFrequency(0, 0) == 1000000);
+	REQUIRE(sdr->GetTxToneAmplitude(0, 0) == Catch::Approx(0.25));
+	REQUIRE(!sdr->IsTxToneEnabled(0, 1));
+
+	//Limits: tones can be up to half the sample rate either side of the LO
+	auto range = sdr->GetTxToneFrequencyRange(0);
+	REQUIRE(range.first == -1250000);
+	REQUIRE(range.second == 1250000);
+	auto lorange = sdr->GetTxLOFrequencyRange();
+	REQUIRE(lorange.first == 70000000);
+	REQUIRE(lorange.second == 6000000000);
+
+	//Changes only reach the radio when the instrument thread gets to them
+	int64_t freq;
+	double scale;
+	int64_t phase;
+	int64_t raw;
+	sdr->SetTxToneFrequency(1, 1, 250000);
+	sdr->SetTxToneAmplitude(1, 1, 0.5);
+	sdr->SetTxToneEnabled(1, 1, true);
+	ReadDDS(ctx, "TX2_I_F2", freq, scale, phase, raw);
+	REQUIRE(raw == 0);
+	sdr->BackgroundProcessing();
+
+	//Both I and Q run at the tone frequency, 90 degrees apart, with I leading for a positive frequency
+	ReadDDS(ctx, "TX2_I_F2", freq, scale, phase, raw);
+	REQUIRE(freq == 250000);
+	REQUIRE(scale == Catch::Approx(0.5));
+	REQUIRE(phase == 90000);
+	REQUIRE(raw == 1);
+	ReadDDS(ctx, "TX2_Q_F2", freq, scale, phase, raw);
+	REQUIRE(freq == 250000);
+	REQUIRE(scale == Catch::Approx(0.5));
+	REQUIRE(phase == 0);
+	REQUIRE(raw == 1);
+
+	//The other tone and path are unaffected
+	ReadDDS(ctx, "TX1_I_F1", freq, scale, phase, raw);
+	REQUIRE(freq == 1000000);
+	REQUIRE(scale == Catch::Approx(0.25));
+	REQUIRE(raw == 1);
+	ReadDDS(ctx, "TX2_I_F1", freq, scale, phase, raw);
+	REQUIRE(raw == 1);
+
+	//Negative frequency swaps I and Q, so the tone is below the LO
+	sdr->SetTxToneFrequency(1, 1, -300000);
+	sdr->BackgroundProcessing();
+	ReadDDS(ctx, "TX2_I_F2", freq, scale, phase, raw);
+	REQUIRE(freq == 300000);
+	REQUIRE(phase == 0);
+	ReadDDS(ctx, "TX2_Q_F2", freq, scale, phase, raw);
+	REQUIRE(freq == 300000);
+	REQUIRE(phase == 90000);
+	REQUIRE(sdr->GetTxToneFrequency(1, 1) == -300000);
+
+	//Turning a tone off
+	sdr->SetTxToneEnabled(1, 1, false);
+	sdr->BackgroundProcessing();
+	ReadDDS(ctx, "TX2_I_F2", freq, scale, phase, raw);
+	REQUIRE(raw == 0);
+	REQUIRE(!sdr->IsTxToneEnabled(1, 1));
+
+	//Out of range requests are clamped
+	sdr->SetTxToneFrequency(0, 0, 5000000);
+	REQUIRE(sdr->GetTxToneFrequency(0, 0) == 1250000);
+	sdr->SetTxToneFrequency(0, 0, -5000000);
+	REQUIRE(sdr->GetTxToneFrequency(0, 0) == -1250000);
+	sdr->SetTxToneAmplitude(0, 0, 2);
+	REQUIRE(sdr->GetTxToneAmplitude(0, 0) == 1);
+	sdr->SetTxToneAmplitude(0, 0, -1);
+	REQUIRE(sdr->GetTxToneAmplitude(0, 0) == 0);
+
+	//Bad indexes are ignored
+	sdr->SetTxToneFrequency(2, 0, 1000);
+	sdr->SetTxToneFrequency(0, 2, 1000);
+	REQUIRE(sdr->GetTxToneFrequency(2, 0) == 0);
+	REQUIRE(sdr->GetTxToneFrequency(0, 2) == 0);
+}
+
+TEST_CASE("IIOSDR_TransmitLO")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9361", ctx);
+
+	//The TX LO is independent of the RX LO
+	sdr->SetTxLOFrequency(915000000);
+	REQUIRE(sdr->GetTxLOFrequency() == 915000000);
+	sdr->BackgroundProcessing();
+
+	int64_t v;
+	REQUIRE(ctx->ReadChannelAttrInt(phy, "altvoltage1", true, "frequency", v));
+	REQUIRE(v == 915000000);
+	REQUIRE(ctx->ReadChannelAttrInt(phy, "altvoltage0", true, "frequency", v));
+	REQUIRE(v == 2400000000);
+	REQUIRE(sdr->GetCenterFrequency(0) == 2400000000);
+	REQUIRE(sdr->GetTxLOFrequency() == 915000000);
+
+	sdr->SetCenterFrequency(0, 433920000);
+	sdr->BackgroundProcessing();
+	REQUIRE(sdr->GetTxLOFrequency() == 915000000);
+
+	//Clamped to what the radio can do
+	sdr->SetTxLOFrequency(10);
+	REQUIRE(sdr->GetTxLOFrequency() == 70000000);
+	sdr->SetTxLOFrequency(20000000000);
+	REQUIRE(sdr->GetTxLOFrequency() == 6000000000);
+}
+
+TEST_CASE("IIOSDR_TransmitFollowsSampleRate")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9363", ctx);
+	REQUIRE(sdr->GetTxChannelCount() == 1);
+
+	//Faster sample rate lets the tones go higher
+	sdr->SetSampleRate(10000000);
+	sdr->SetTxToneFrequency(0, 0, 4000000);
+	sdr->BackgroundProcessing();
+	REQUIRE(sdr->GetTxToneFrequencyRange(0).second == 5000000);
+	REQUIRE(sdr->GetTxToneFrequency(0, 0) == 4000000);
+
+	int64_t freq;
+	double scale;
+	int64_t phase;
+	int64_t raw;
+	ReadDDS(ctx, "TX1_I_F1", freq, scale, phase, raw);
+	REQUIRE(freq == 4000000);
+}
+
+TEST_CASE("IIOSDR_TransmitSessionRoundTrip")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9361", ctx);
+
+	sdr->SetTxLOFrequency(868000000);
+	sdr->SetTxToneFrequency(0, 0, -123000);
+	sdr->SetTxToneAmplitude(0, 0, 0.75);
+	sdr->SetTxToneFrequency(1, 1, 456000);
+	sdr->SetTxToneAmplitude(1, 1, 0.125);
+	sdr->SetTxToneEnabled(1, 1, true);
+	sdr->SetTxToneEnabled(0, 0, false);
+	sdr->BackgroundProcessing();
+
+	IDTable table;
+	auto node = sdr->SerializeConfiguration(table);
+	REQUIRE(node["tx"]);
+
+	IIOContext* ctx2;
+	auto sdr2 = MakeSDR("mock:ad9361", ctx2);
+	REQUIRE(sdr2->GetTxLOFrequency() == 2400000000);
+	IDTable idmap;
+	sdr2->LoadConfiguration(2, node, idmap);
+	sdr2->BackgroundProcessing();
+
+	REQUIRE(sdr2->GetTxLOFrequency() == 868000000);
+	REQUIRE(sdr2->GetTxToneFrequency(0, 0) == -123000);
+	REQUIRE(sdr2->GetTxToneAmplitude(0, 0) == Catch::Approx(0.75));
+	REQUIRE(!sdr2->IsTxToneEnabled(0, 0));
+	REQUIRE(sdr2->GetTxToneFrequency(1, 1) == 456000);
+	REQUIRE(sdr2->GetTxToneAmplitude(1, 1) == Catch::Approx(0.125));
+	REQUIRE(sdr2->IsTxToneEnabled(1, 1));
+
+	//And it all made it to the radio
+	int64_t freq;
+	double scale;
+	int64_t phase;
+	int64_t raw;
+	ReadDDS(ctx2, "TX1_Q_F1", freq, scale, phase, raw);
+	REQUIRE(freq == 123000);
+	REQUIRE(phase == 90000);
+	REQUIRE(raw == 0);
+	ReadDDS(ctx2, "TX2_I_F2", freq, scale, phase, raw);
+	REQUIRE(freq == 456000);
+	REQUIRE(raw == 1);
 }
 
 #endif

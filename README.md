@@ -12,11 +12,13 @@ This is a fork of [ngscopeclient/scopehal-apps](https://github.com/ngscopeclient
 **Software defined radio (ADALM-PLUTO and other AD9361/AD9363 radios)**
 
 * Optional [libiio](https://github.com/analogdevicesinc/libiio) support (0.x API only, enabled automatically if found): an
-  `iio` transport and an `iio` driver for receiving from AD936x based radios, with center frequency, bandwidth, sample
+  `iio` transport and an `iio` driver for AD936x based radios, with center frequency, bandwidth, sample
   rate and gain control. Limits come from the radio, and USB-attached radios are listed when adding an instrument.
 * A simulated radio (use the path `mock:` or `mock:ad9361`) for development without hardware. It has been tested only against
   this simulation and **not yet against a real radio**.
 * Receive gain mode and gain are shown in the stream browser in place of attenuation for radios that have gain control.
+* Transmit paths of radios with a DDS core are shown in the stream browser, with two tones per path with frequency,
+  amplitude and on/off controls, and a TX LO setting shared by all paths.
 * New Complex FFT filter for I/Q data.
 
 **User interface**
