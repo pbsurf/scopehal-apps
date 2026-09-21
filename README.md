@@ -4,6 +4,55 @@ This is the top level repository for ngscopeclient, as well as the unit tests fo
 
 Project website: [https://www.ngscopeclient.org](https://www.ngscopeclient.org)
 
+## Changes in this fork
+
+This is a fork of [ngscopeclient/scopehal-apps](https://github.com/ngscopeclient/scopehal-apps). The `lib` (scopehal) and
+`doc` (scopehal-docs) submodules also carry changes, and are forks too. Compared with upstream:
+
+**Software defined radio (ADALM-PLUTO and other AD9361/AD9363 radios)**
+
+* Optional [libiio](https://github.com/analogdevicesinc/libiio) support (0.x API only, enabled automatically if found): an
+  `iio` transport and an `iio` driver for receiving from AD936x based radios, with center frequency, bandwidth, sample
+  rate and gain control. Limits come from the radio, and USB-attached radios are listed when adding an instrument.
+* A simulated radio (use the path `mock:` or `mock:ad9361`) for development without hardware. It has been tested only against
+  this simulation and **not yet against a real radio**.
+* Receive gain mode and gain are shown in the stream browser in place of attenuation for radios that have gain control.
+* New Complex FFT filter for I/Q data.
+
+**User interface**
+
+* Plot interaction: dragging pans the plot when there are no cursors, Ctrl+drag zooms to a box, double click/tap on an
+  axis autofits it, pinch zoom and other touch improvements, and precise axis labels and cursor positions when zoomed far in.
+* Windowing and input ported from GLFW to SDL2.
+* Up/Down in numeric input boxes now step the digit to the left of the cursor and apply immediately, instead of moving
+  between boxes. Boxes with an Apply button only edit the text. Turn this off with `-DNUMERIC_INPUT_ARROW_STEP=OFF`.
+* Manage Instruments has a Recent Instruments section with Connect and Delete buttons. Fixed reopening a recent instrument
+  whose path ends in a colon (such as `mock:`).
+* Better responsiveness in event-driven (power saving) mode.
+* New `--reconnect` and `--offline` options to skip the reconnect prompt when opening a session from the command line.
+
+**Fixes and testing aids**
+
+* Simulated function generator (`demofuncgen`) for demonstration and UI testing, saved and loaded with sessions.
+* Fixed a crash in the FFT filter on an empty input waveform, and value formatting that dropped digits
+  (`1.0004 GHz` was shown as `1 GHz`).
+* Fixed staircase function generator shapes loading as a sine wave from a saved session.
+
+**Build**
+
+* Precompiled headers are now off by default (`DISABLE_PCH=ON`). With the Makefile generators, adding a source file to a
+  target that uses them rebuilds the whole target. Use `-DDISABLE_PCH=OFF` for faster full builds.
+
+## TODO
+
+- cleanup Units.h
+- why was a scratch build directory used?
+- dialog sizing
+- line width?
+- configurable axis step size?
+- support for gnu radio blocks?
+- getting audio from SDL?
+
 ## CI platform updates
 
 We are no longer building with GitHub Actions and have switched to an internal CI system. This enables running tests against real GPUs from a range of vendors, and will eventually enable hardware-in-loop testing with real instruments although more infrastructure has to be deployed before that will be available.
