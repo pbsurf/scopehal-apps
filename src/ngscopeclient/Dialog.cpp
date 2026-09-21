@@ -236,15 +236,81 @@ void Dialog::HelpMarker(const string& header, const vector<string>& bullets)
 ///@brief ID of the numeric box most recently changed by an Up/Down step, used to avoid applying the same value twice
 static ImGuiID g_steppedItemId = 0;
 
+/**
+	@brief Text of the box in g_steppedItemId as of the end of the last frame it was edited
+
+	While a box is active ImGui ignores the string it was given, so if the code that owns the value changes it after a
+	step (for example because the driver limited the value we asked for) the box would keep showing what was typed.
+	Comparing the string to this tells us when that happened, so that we can update the box.
+ */
+static string g_steppedItemText;
+
 #ifdef NUMERIC_INPUT_ARROW_STEP
+
+///@brief State shared with NumericStepCallback
+struct NumericStepData
+{
+	///@brief Set to true if the text was changed by a step
+	bool stepped;
+
+	///@brief If not null, text to replace the contents of the box with
+	const string* replaceText;
+};
+
+/**
+	@brief Finds the end of the number at the start of a string (optional sign, digits, at most one decimal mark)
+ */
+static int NumberEnd(const string& text)
+{
+	size_t i = 0;
+	if( (i < text.size()) && ( (text[i] == '-') || (text[i] == '+') ) )
+		i ++;
+	bool mark = false;
+	while(i < text.size())
+	{
+		char c = text[i];
+		if(isdigit(static_cast<unsigned char>(c)))
+			i ++;
+		else if( ( (c == '.') || (c == ',') ) && !mark )
+		{
+			mark = true;
+			i ++;
+		}
+		else
+			break;
+	}
+	return static_cast<int>(i);
+}
 
 /**
 	@brief InputText callback that steps the digit to the left of the cursor when Up/Down is pressed
 
-	@param data		ImGui callback data. UserData points to a bool that is set to true if the text was changed.
+	It also replaces the text of the box if asked to, which is done every frame since that's the only time ImGui lets us
+	change the text of a box that is being edited.
+
+	@param data		ImGui callback data. UserData points to a NumericStepData.
  */
 static int NumericStepCallback(ImGuiInputTextCallbackData* data)
 {
+	auto step = static_cast<NumericStepData*>(data->UserData);
+
+	if(data->EventFlag == ImGuiInputTextFlags_CallbackAlways)
+	{
+		//If the user stepped again this frame, that wins. The new text will be replaced next frame if it needs to be.
+		if(step->replaceText && !step->stepped)
+		{
+			//Keep the cursor where it was, as long as it's still in the number
+			int cursor = min(data->CursorPos, NumberEnd(*step->replaceText));
+
+			data->DeleteChars(0, data->BufTextLen);
+			data->InsertChars(0, step->replaceText->c_str());
+			data->CursorPos = cursor;
+			data->SelectionStart = cursor;
+			data->SelectionEnd = cursor;
+		}
+		return 0;
+	}
+
 	if(data->EventFlag != ImGuiInputTextFlags_CallbackHistory)
 		return 0;
 
@@ -260,7 +326,7 @@ static int NumericStepCallback(ImGuiInputTextCallbackData* data)
 		data->SelectionStart = newCursor;
 		data->SelectionEnd = newCursor;
 
-		*static_cast<bool*>(data->UserData) = true;
+		step->stepped = true;
 	}
 
 	//If there's no number to step (like "Auto"), the key is still ours. Don't fall back to moving between widgets.
@@ -279,6 +345,7 @@ static int NumericStepCallback(ImGuiInputTextCallbackData* data)
 	@param flags	ImGui flags for the input box
 	@param unit		Unit of the value
 	@param stepped	Set to true if the text was changed by an Up/Down step in this frame
+	@param replace	If not null, text to replace the contents of the box with (unless it was stepped in this frame)
 
 	@return			Same as ImGui::InputText()
  */
@@ -287,7 +354,8 @@ static bool NumericInputText(
 	string* text,
 	ImGuiInputTextFlags flags,
 	Unit& unit,
-	bool& stepped)
+	bool& stepped,
+	const string* replace = nullptr)
 {
 	stepped = false;
 
@@ -295,11 +363,19 @@ static bool NumericInputText(
 	//Hex numbers aren't stepped as decimal digits
 	if(unit.GetType() != Unit::UNIT_HEXNUM)
 	{
-		return ImGui::InputText(
-			label.c_str(), text, flags | ImGuiInputTextFlags_CallbackHistory, NumericStepCallback, &stepped);
+		NumericStepData step = { false, replace };
+		bool ret = ImGui::InputText(
+			label.c_str(),
+			text,
+			flags | ImGuiInputTextFlags_CallbackHistory | ImGuiInputTextFlags_CallbackAlways,
+			NumericStepCallback,
+			&step);
+		stepped = step.stepped;
+		return ret;
 	}
 #else
 	(void)unit;
+	(void)replace;
 #endif
 
 	return ImGui::InputText(label.c_str(), text, flags);
@@ -720,8 +796,16 @@ bool Dialog::renderEditableProperty(
 			enterPressed = ImGui::InputText(editLabel.c_str(), &currentValue, ImGuiInputTextFlags_EnterReturnsTrue);
 		else
 		{
+			//If we stepped this box and whatever owns the value has since changed the text (because the instrument
+			//limited the value, for example) the box needs to be told since it's not going to notice
+			string replaceText;
+			bool replace = (g_steppedItemId == editId) && (currentValue != g_steppedItemText);
+			if(replace)
+				replaceText = currentValue;
+
 			enterPressed = NumericInputText(
-				editLabel, &currentValue, ImGuiInputTextFlags_EnterReturnsTrue, unit, stepped);
+				editLabel, &currentValue, ImGuiInputTextFlags_EnterReturnsTrue, unit, stepped,
+				replace ? &replaceText : nullptr);
 		}
 		if(enterPressed)
 		{	// Input validated (but no apply button)
@@ -762,6 +846,10 @@ bool Dialog::renderEditableProperty(
 				changed = true;
 				g_steppedItemId = editId;
 			}
+
+			//Remember what the box has in it, so we can tell if it changes behind its back
+			if(g_steppedItemId == editId)
+				g_steppedItemText = currentValue;
 		}
 
 		if(explicitApply && dirty)
