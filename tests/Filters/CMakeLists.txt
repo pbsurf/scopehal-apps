@@ -3,6 +3,7 @@ add_executable(Filters
 
 	Filter_Add.cpp
 	Filter_ACRMS.cpp
+	Filter_ComplexFFT.cpp
 	Filter_EyePattern.cpp
 	Filter_FIR.cpp
 	Filter_Subtract.cpp
