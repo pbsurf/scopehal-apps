@@ -396,33 +396,81 @@ bool ChannelPropertiesDialog::DoRender()
 			//Analog
 			else
 			{
-				//Attenuation
-				Unit counts(Unit::UNIT_COUNTS);
-				ImGui::SetNextItemWidth(width);
-				if(m_probe != "")	//cannot change attenuation on active probes
-					ImGui::BeginDisabled();
-				if(UnitInputWithImplicitApply("Attenuation", m_attenuation, m_committedAttenuation, counts))
+				//SDR receive gain replaces attenuation, since a radio has no probe to compensate for
+				auto sdr = dynamic_cast<SCPISDR*>(scope);
+				if(sdr && m_state && m_state->m_hasGain[index])
 				{
-					scope->SetChannelAttenuation(index, m_committedAttenuation);
+					Unit db(Unit::UNIT_DB);
 
-					//Update offset and range when attenuation is changed
-					for(size_t i = 0; i<nstreams; i++)
+					//Only show mode selection if there is a choice
+					if(m_state->m_gainModes[index].size() > 1)
 					{
-						auto unit = chan->GetYAxisUnits(i);
+						ImGui::SetNextItemWidth(width);
+						if(Combo("Gain mode", m_state->m_gainModes[index], m_state->m_gainMode[index]))
+						{
+							sdr->SetGainMode(index, m_state->m_gainModes[index][m_state->m_gainMode[index]]);
 
-						m_committedOffset[i] = ochan->GetOffset(i);
-						m_offset[i] = unit.PrettyPrint(m_committedOffset[i]);
-
-						m_committedRange[i] = ochan->GetVoltageRange(i);
-						m_range[i] = unit.PrettyPrint(m_committedRange[i]);
+							//The mode changes whether the gain can be set, and may change its value
+							m_state->m_needsUpdate[index] = true;
+						}
+						HelpMarker(
+							"Gain control mode of the receiver.\n\n"
+							"In manual mode the gain is fixed at the value below. The other modes use automatic gain "
+							"control (AGC) to adapt to the signal level, and the gain cannot be set by hand.");
 					}
 
-					// Tell intrument thread that the scope state has to be updated
-					if(m_state) m_state->m_needsUpdate[index] = true;
+					//Can't set the gain by hand if the radio is running AGC
+					bool adjustable = m_state->m_gainAdjustable[index];
+					auto range = sdr->GetGainRange(index);
+					char help[128];
+					snprintf(help, sizeof(help), "Receive gain, from %.0f to %.0f dB.%s",
+						range.first, range.second,
+						adjustable ? "" : "\n\nThis is disabled because automatic gain control is active.");
+					if(!adjustable)
+						ImGui::BeginDisabled();
+					ImGui::SetNextItemWidth(width);
+					if(UnitInputWithImplicitApply("Gain", m_state->m_strGain[index], m_state->m_committedGain[index], db))
+					{
+						sdr->SetGain(index, m_state->m_committedGain[index]);
+
+						//Refresh in case the driver limited the value
+						m_state->m_needsUpdate[index] = true;
+					}
+					if(!adjustable)
+						ImGui::EndDisabled();
+					HelpMarker(help);
 				}
-				if(m_probe != "")
-					ImGui::EndDisabled();
-				HelpMarker("Attenuation setting for the probe (for example, 10 for a 10:1 probe)");
+
+				//Attenuation
+				else
+				{
+					Unit counts(Unit::UNIT_COUNTS);
+					ImGui::SetNextItemWidth(width);
+					if(m_probe != "")	//cannot change attenuation on active probes
+						ImGui::BeginDisabled();
+					if(UnitInputWithImplicitApply("Attenuation", m_attenuation, m_committedAttenuation, counts))
+					{
+						scope->SetChannelAttenuation(index, m_committedAttenuation);
+
+						//Update offset and range when attenuation is changed
+						for(size_t i = 0; i<nstreams; i++)
+						{
+							auto unit = chan->GetYAxisUnits(i);
+
+							m_committedOffset[i] = ochan->GetOffset(i);
+							m_offset[i] = unit.PrettyPrint(m_committedOffset[i]);
+
+							m_committedRange[i] = ochan->GetVoltageRange(i);
+							m_range[i] = unit.PrettyPrint(m_committedRange[i]);
+						}
+
+						// Tell intrument thread that the scope state has to be updated
+						if(m_state) m_state->m_needsUpdate[index] = true;
+					}
+					if(m_probe != "")
+						ImGui::EndDisabled();
+					HelpMarker("Attenuation setting for the probe (for example, 10 for a 10:1 probe)");
+				}
 
 				//Only show coupling box if the instrument has configurable coupling
 				if( (m_couplings.size() > 1) && (m_probe == "") )

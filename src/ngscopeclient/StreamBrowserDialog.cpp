@@ -1334,8 +1334,9 @@ void StreamBrowserDialog::DoFrequencySettings(shared_ptr<Oscilloscope> scope)
 
 	Unit hz(Unit::UNIT_HZ);
 
-	// Resolution Bandwidh
-	if(renderEditableProperty(width,"Rbw", p->m_rbwText, p->m_rbw, hz, "Resolution Bandwidth"))
+	// Resolution Bandwidh (not applicable to everything with frequency controls, e.g. SDRs)
+	if(scope->HasResolutionBandwidth() &&
+		renderEditableProperty(width,"Rbw", p->m_rbwText, p->m_rbw, hz, "Resolution Bandwidth"))
 	{
 		scope->SetResolutionBandwidth(p->m_rbw);
 		// Update with values from the device
@@ -2103,6 +2104,10 @@ void StreamBrowserDialog::renderStreamNode(
 	auto scopechan = dynamic_cast<OscilloscopeChannel *>(channel);
 	Stream::StreamType type = scopechan ? scopechan->GetType(streamIndex) : Stream::StreamType::STREAM_TYPE_ANALOG;
 
+	//Offset and range of an SDR's I/Q streams only affect how we plot them, they aren't hardware settings.
+	//They are still available in the channel properties dialog, so don't clutter the stream browser with them.
+	bool sdrStream = (std::dynamic_pointer_cast<SCPISDR>(scope) != nullptr) && renderName;
+
 	ImGui::PushID(streamIndex);
 
 	// Stream name
@@ -2136,7 +2141,7 @@ void StreamBrowserDialog::renderStreamNode(
 		switch (type)
 		{
 			case Stream::STREAM_TYPE_ANALOG:
-				hasProps = true;
+				hasProps = !sdrStream;
 				break;
 			case Stream::STREAM_TYPE_DIGITAL:
 				if(scope && scope->IsDigitalThresholdConfigurable())
