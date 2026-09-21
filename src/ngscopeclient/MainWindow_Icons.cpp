@@ -58,6 +58,7 @@
 #include "../scopeprotocols/ClipFilter.h"
 #include "../scopeprotocols/ClockRecoveryFilter.h"
 #include "../scopeprotocols/ConstellationFilter.h"
+#include "../scopeprotocols/ComplexFFTFilter.h"
 #include "../scopeprotocols/ComplexImportFilter.h"
 #include "../scopeprotocols/ComplexSpectrogramFilter.h"
 #include "../scopeprotocols/ConstantFilter.h"
@@ -469,6 +470,7 @@ void MainWindow::LoadFilterIcons()
 	m_filterIconMap[type_index(typeid(ClockRecoveryFilter))]					= "filter-cdrpll";
 	m_filterIconMap[type_index(typeid(ConstellationFilter))] 					= "filter-constellation";
 	m_filterIconMap[type_index(typeid(ConstantFilter))]							= "filter-constant";
+	m_filterIconMap[type_index(typeid(ComplexFFTFilter))] 						= "filter-fft";
 	m_filterIconMap[type_index(typeid(ComplexImportFilter))]					= "filter-complex-import";
 	m_filterIconMap[type_index(typeid(ComplexSpectrogramFilter))]				= "filter-complex-spectrogram";
 	m_filterIconMap[type_index(typeid(CouplerDeEmbedFilter))]					= "filter-coupler-de-embed";
