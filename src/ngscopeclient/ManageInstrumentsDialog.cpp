@@ -102,6 +102,15 @@ bool ManageInstrumentsDialog::DoRender()
 		}
 	}
 
+	if(ImGui::CollapsingHeader("Recent Instruments", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		HelpMarker(
+			"Instruments you have connected to before.\n"
+			"Connect adds one to the session again. Delete only removes it from this list.");
+
+		RecentInstrumentsTable();
+	}
+
 	return true;
 }
 
@@ -549,4 +558,142 @@ void ManageInstrumentsDialog::AllInstrumentsTable()
 		ImGui::PopID();
 		instIndex++;
 	}
+}
+
+/**
+	@brief Table of instruments we've connected to before, with buttons to connect to or forget each one
+ */
+void ManageInstrumentsDialog::RecentInstrumentsTable()
+{
+	//Most recently used first
+	vector<pair<time_t, string> > entries;
+	for(auto& it : m_parent->GetRecentInstruments())
+		entries.push_back(pair<time_t, string>(it.second, it.first));
+	sort(entries.begin(), entries.end(),
+		[](const pair<time_t, string>& a, const pair<time_t, string>& b)
+		{
+			if(a.first != b.first)
+				return a.first > b.first;
+			return a.second < b.second;
+		});
+
+	if(entries.empty())
+	{
+		ImGui::TextDisabled("No recent instruments");
+		return;
+	}
+
+	//Nicknames of what we're already connected to
+	set<string> connected;
+	for(auto inst : m_session->GetInstruments())
+		connected.emplace(inst->m_nickname);
+
+	ImGuiTableFlags flags =
+		ImGuiTableFlags_Resizable |
+		ImGuiTableFlags_BordersOuter |
+		ImGuiTableFlags_BordersV |
+		ImGuiTableFlags_RowBg |
+		ImGuiTableFlags_SizingFixedFit |
+		ImGuiTableFlags_NoKeepColumnsVisible;
+
+	//Connecting and deleting change the list we're drawing from, so remember what to do and do it at the end
+	string toConnect;
+	string toDelete;
+
+	if(ImGui::BeginTable("recenttable", 6, flags))
+	{
+		float width = ImGui::GetFontSize();
+		ImGui::TableSetupScrollFreeze(0, 1); //Header row does not scroll
+		ImGui::TableSetupColumn("Nickname", ImGuiTableColumnFlags_WidthFixed, 12*width);
+		ImGui::TableSetupColumn("Driver", ImGuiTableColumnFlags_WidthFixed, 10*width);
+		ImGui::TableSetupColumn("Transport", ImGuiTableColumnFlags_WidthFixed, 5*width);
+		ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthFixed, 20*width);
+		ImGui::TableSetupColumn("Last used", ImGuiTableColumnFlags_WidthFixed, 11*width);
+		ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 12*width);
+		ImGui::TableHeadersRow();
+
+		for(auto& entry : entries)
+		{
+			//If the entry is damaged, show it as-is so that it can at least be deleted
+			string nick;
+			string driver;
+			string transport;
+			string path;
+			bool wellFormed = MainWindow::ParseRecentInstrument(entry.second, nick, driver, transport, path);
+			if(!wellFormed)
+			{
+				nick = entry.second;
+				driver = "";
+				transport = "";
+				path = "";
+			}
+
+			char lastUsed[64];
+			struct tm ltime;
+		#ifdef _WIN32
+			localtime_s(&ltime, &entry.first);
+		#else
+			localtime_r(&entry.first, &ltime);
+		#endif
+			strftime(lastUsed, sizeof(lastUsed), "%Y-%m-%d %H:%M", &ltime);
+
+			ImGui::PushID(entry.second.c_str());
+			ImGui::TableNextRow(ImGuiTableRowFlags_None);
+
+			if(ImGui::TableSetColumnIndex(0))
+			{
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextUnformatted(nick.c_str());
+			}
+			if(ImGui::TableSetColumnIndex(1))
+			{
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextUnformatted(driver.c_str());
+			}
+			if(ImGui::TableSetColumnIndex(2))
+			{
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextUnformatted(transport.c_str());
+			}
+			if(ImGui::TableSetColumnIndex(3))
+			{
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextUnformatted(path.c_str());
+			}
+			if(ImGui::TableSetColumnIndex(4))
+			{
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextUnformatted(lastUsed);
+			}
+			if(ImGui::TableSetColumnIndex(5))
+			{
+				//Don't connect twice under the same name
+				bool alreadyConnected = wellFormed && (connected.find(nick) != connected.end());
+				bool canConnect = wellFormed && !alreadyConnected;
+
+				if(!canConnect)
+					ImGui::BeginDisabled();
+				if(ImGui::Button("Connect"))
+					toConnect = entry.second;
+				if(!canConnect)
+					ImGui::EndDisabled();
+				if(alreadyConnected)
+					Tooltip("An instrument named \"" + nick + "\" is already connected", true);
+
+				ImGui::SameLine();
+				if(ImGui::Button("Delete"))
+					toDelete = entry.second;
+				Tooltip("Remove from this list (does not affect connected instruments)");
+			}
+
+			ImGui::PopID();
+		}
+
+		ImGui::EndTable();
+	}
+
+	if(!toConnect.empty())
+		m_parent->ConnectRecentInstrument(toConnect);
+	if(!toDelete.empty())
+		m_parent->RemoveFromRecentInstrumentList(toDelete);
 }

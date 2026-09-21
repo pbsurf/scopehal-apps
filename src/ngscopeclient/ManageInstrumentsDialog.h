@@ -51,6 +51,7 @@ protected:
 
 	void TriggerGroupsTable();
 	void AllInstrumentsTable();
+	void RecentInstrumentsTable();
 
 	std::vector<std::string> m_instrumentCommittedNames;
 	std::vector<std::string> m_instrumentCurrentNames;

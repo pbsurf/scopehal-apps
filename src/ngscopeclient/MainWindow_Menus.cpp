@@ -224,6 +224,29 @@ void MainWindow::ViewMenu()
 	}
 }
 
+///@brief Kinds of instruments that can be added, in the order they appear in the Add menu
+struct InstrumentTypeInfo
+{
+	const char* pretty;
+	const char* defaultName;
+	const char* internal;
+};
+
+static const InstrumentTypeInfo g_instrumentTypes[] =
+{
+	{ "BERT", "bert", "bert" },
+	{ "Function Generator", "funcgen", "funcgen" },
+	{ "Load", "load", "load" },
+	{ "Misc", "inst", "misc" },
+	{ "Multimeter", "meter", "multimeter" },
+	{ "Oscilloscope", "scope", "oscilloscope" },
+	{ "Power Supply", "psu", "psu" },
+	{ "RF Generator", "rfgen", "rfgen" },
+	{ "SDR", "sdr", "sdr" },
+	{ "Spectrometer", "spec", "spectrometer" },
+	{ "VNA", "vna", "vna" }
+};
+
 /**
 	@brief Run the Add menu
  */
@@ -247,17 +270,8 @@ void MainWindow::AddMenu()
 			timestamps.push_back(t);
 		std::sort(timestamps.begin(), timestamps.end());
 
-		DoAddSubMenu(timestamps, reverseMap, "BERT", "bert", "bert");
-		DoAddSubMenu(timestamps, reverseMap, "Function Generator", "funcgen", "funcgen");
-		DoAddSubMenu(timestamps, reverseMap, "Load", "load", "load");
-		DoAddSubMenu(timestamps, reverseMap, "Misc", "inst", "misc");
-		DoAddSubMenu(timestamps, reverseMap, "Multimeter", "meter", "multimeter");
-		DoAddSubMenu(timestamps, reverseMap, "Oscilloscope", "scope", "oscilloscope");
-		DoAddSubMenu(timestamps, reverseMap, "Power Supply", "psu", "psu");
-		DoAddSubMenu(timestamps, reverseMap, "RF Generator", "rfgen", "rfgen");
-		DoAddSubMenu(timestamps, reverseMap, "SDR", "sdr", "sdr");
-		DoAddSubMenu(timestamps, reverseMap, "Spectrometer", "spec", "spectrometer");
-		DoAddSubMenu(timestamps, reverseMap, "VNA", "vna", "vna");
+		for(auto& type : g_instrumentTypes)
+			DoAddSubMenu(timestamps, reverseMap, type.pretty, type.defaultName, type.internal);
 
 		ImGui::Separator();
 
@@ -296,7 +310,7 @@ void MainWindow::AddMenu()
 
 	@return				True if the entry is well formed
  */
-static bool ParseRecentInstrument(const string& s, string& nick, string& driver, string& transport, string& path)
+bool MainWindow::ParseRecentInstrument(const string& s, string& nick, string& driver, string& transport, string& path)
 {
 	auto c1 = s.find(':');
 	auto c2 = (c1 == string::npos) ? string::npos : s.find(':', c1 + 1);
@@ -321,6 +335,71 @@ static bool ParseRecentInstrument(const string& s, string& nick, string& driver,
 	}
 
 	return !nick.empty() && !driver.empty() && !transport.empty();
+}
+
+/**
+	@brief Connects to an instrument from the recent instrument list and adds it to the session
+
+	If we can't connect, opens the add instrument dialog pre-filled with the instrument's details so the user can fix
+	the connection path.
+
+	@param entry			Entry of the recent instrument list (see GetRecentInstruments())
+	@param typePretty		Kind of instrument for the title of the dialog if we fail (for example "Oscilloscope").
+							If empty, this is figured out from the driver.
+	@param typeInternal		Internal name of the kind of instrument (for example "oscilloscope").
+							If empty, this is figured out from the driver.
+
+	@return					True if the instrument was connected and added
+ */
+bool MainWindow::ConnectRecentInstrument(const string& entry, const string& typePretty, const string& typeInternal)
+{
+	string nick;
+	string drivername;
+	string transname;
+	string path;
+	if(!ParseRecentInstrument(entry, nick, drivername, transname, path))
+		return false;
+
+	//MakeTransport shows an error popup if we can't connect
+	bool success = false;
+	auto transport = MakeTransport(transname, path);
+	if(transport != nullptr)
+		success = m_session.CreateAndAddInstrument(drivername, transport, nick);
+	if(success)
+		return true;
+
+	//Figure out what kind of instrument this is, unless we were told
+	string pretty = typePretty;
+	string internal = typeInternal;
+	if(internal.empty())
+	{
+		for(auto& type : g_instrumentTypes)
+		{
+			auto drivers = m_session.GetDriverNamesForType(type.internal);
+			if(find(drivers.begin(), drivers.end(), drivername) != drivers.end())
+			{
+				pretty = type.pretty;
+				internal = type.internal;
+				break;
+			}
+		}
+	}
+
+	//Spawn an AddInstrument dialog here, prefilled with intrument informations, to allow changing connection path
+	if(!internal.empty())
+	{
+		m_dialogs.emplace(make_shared<AddInstrumentDialog>(
+			string("Update ") + pretty,
+			nick,
+			&m_session,
+			this,
+			internal,
+			drivername,
+			transname,
+			path));
+	}
+
+	return false;
 }
 
 /**
@@ -380,33 +459,7 @@ void MainWindow::DoAddSubMenu(
 				if(driverset.find(drivername) != driverset.end())
 				{
 					if(ImGui::MenuItem(nick.c_str()))
-					{
-						bool success = true;
-						auto transport = MakeTransport(transname, path);
-						if(transport != nullptr)
-						{
-							if(!m_session.CreateAndAddInstrument(drivername, transport, nick))
-							{
-								success = false;
-							}
-						}
-						else
-						{
-							success = false;
-						}
-						if(!success)
-						{	// Spawn an AddInstrument dialog here, prefilled with intrument informations, to allow changing connection path
-							m_dialogs.emplace(make_shared<AddInstrumentDialog>(
-								string("Update ") + typePretty,
-								nick,
-								&m_session,
-								this,
-								typeInternal,
-								drivername,
-								transname,
-								path));
-						}
-					}
+						ConnectRecentInstrument(cstring, typePretty, typeInternal);
 				}
 			}
 		}

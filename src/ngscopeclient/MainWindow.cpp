@@ -1804,6 +1804,19 @@ void MainWindow::AddToRecentInstrumentList(shared_ptr<SCPIInstrument> inst)
 	SaveRecentInstrumentList();
 }
 
+/**
+	@brief Removes an entry from the recent instrument list
+
+	@param entry	Entry to remove, in the form used as a key of GetRecentInstruments()
+ */
+void MainWindow::RemoveFromRecentInstrumentList(const string& entry)
+{
+	LogTrace("Removing \"%s\" from recent instrument list\n", entry.c_str());
+
+	if(m_recentInstruments.erase(entry) > 0)
+		SaveRecentInstrumentList();
+}
+
 void MainWindow::RenameRecentInstrument(std::shared_ptr<SCPIInstrument> inst, const std::string& oldName)
 {
 	if(inst == nullptr)

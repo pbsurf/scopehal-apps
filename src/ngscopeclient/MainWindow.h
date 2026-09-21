@@ -598,6 +598,23 @@ public:
 	void AddToRecentInstrumentList(std::shared_ptr<SCPIInstrument> inst);
 	void RenameRecentInstrument(std::shared_ptr<SCPIInstrument> inst, const std::string& oldName);
 	void RepathRecentInstrument(std::shared_ptr<SCPIInstrument> inst, const std::string& oldPath);
+	void RemoveFromRecentInstrumentList(const std::string& entry);
+
+	///@brief Gets the recent instrument list. Keys are entries of the form "nickname:driver:transport:path".
+	const std::map<std::string, time_t>& GetRecentInstruments() const
+	{ return m_recentInstruments; }
+
+	static bool ParseRecentInstrument(
+		const std::string& entry,
+		std::string& nick,
+		std::string& driver,
+		std::string& transport,
+		std::string& path);
+
+	bool ConnectRecentInstrument(
+		const std::string& entry,
+		const std::string& typePretty = "",
+		const std::string& typeInternal = "");
 
 protected:
 
