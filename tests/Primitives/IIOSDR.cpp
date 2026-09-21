@@ -538,6 +538,20 @@ TEST_CASE("IIOSDR_SessionRoundTrip")
 	REQUIRE(sdr2->GetGainMode(1) == "manual");
 	REQUIRE(sdr2->GetGain(1) == 33);
 
+	//Loading a session must not change what kind of streams the channels have
+	for(size_t i=0; i<2; i++)
+	{
+		auto chan = sdr2->GetChannel(i);
+		REQUIRE(chan->GetStreamCount() == 3);
+		REQUIRE(chan->GetType(0) == Stream::STREAM_TYPE_ANALOG);
+		REQUIRE(chan->GetType(1) == Stream::STREAM_TYPE_ANALOG);
+		REQUIRE(chan->GetType(2) == Stream::STREAM_TYPE_ANALOG_SCALAR);
+		REQUIRE((chan->GetYAxisUnits(0) == Unit(Unit::UNIT_VOLTS)));
+		REQUIRE((chan->GetYAxisUnits(1) == Unit(Unit::UNIT_VOLTS)));
+		REQUIRE((chan->GetYAxisUnits(2) == Unit(Unit::UNIT_HZ)));
+		REQUIRE(chan->GetStreamName(2) == "center");
+	}
+
 	//And it all made it to the radio
 	int64_t v;
 	double gain;
