@@ -230,6 +230,81 @@ void Dialog::HelpMarker(const string& header, const vector<string>& bullets)
 	}
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Numeric text input with Up/Down stepping
+
+///@brief ID of the numeric box most recently changed by an Up/Down step, used to avoid applying the same value twice
+static ImGuiID g_steppedItemId = 0;
+
+#ifdef NUMERIC_INPUT_ARROW_STEP
+
+/**
+	@brief InputText callback that steps the digit to the left of the cursor when Up/Down is pressed
+
+	@param data		ImGui callback data. UserData points to a bool that is set to true if the text was changed.
+ */
+static int NumericStepCallback(ImGuiInputTextCallbackData* data)
+{
+	if(data->EventFlag != ImGuiInputTextFlags_CallbackHistory)
+		return 0;
+
+	string text(data->Buf, data->BufTextLen);
+	string newText;
+	int newCursor;
+	bool up = (data->EventKey == ImGuiKey_UpArrow);
+	if(Unit::StepNumericText(text, data->CursorPos, up, newText, newCursor))
+	{
+		data->DeleteChars(0, data->BufTextLen);
+		data->InsertChars(0, newText.c_str());
+		data->CursorPos = newCursor;
+		data->SelectionStart = newCursor;
+		data->SelectionEnd = newCursor;
+
+		*static_cast<bool*>(data->UserData) = true;
+	}
+
+	//If there's no number to step (like "Auto"), the key is still ours. Don't fall back to moving between widgets.
+	return 0;
+}
+
+#endif
+
+/**
+	@brief Text box for a numeric value, where the Up and Down arrows step the digit to the left of the cursor
+
+	The step is done on the text, so the prefix and unit are not reformatted while the user is stepping.
+
+	@param label	Label of the input box
+	@param text		Text of the input box
+	@param flags	ImGui flags for the input box
+	@param unit		Unit of the value
+	@param stepped	Set to true if the text was changed by an Up/Down step in this frame
+
+	@return			Same as ImGui::InputText()
+ */
+static bool NumericInputText(
+	const string& label,
+	string* text,
+	ImGuiInputTextFlags flags,
+	Unit& unit,
+	bool& stepped)
+{
+	stepped = false;
+
+#ifdef NUMERIC_INPUT_ARROW_STEP
+	//Hex numbers aren't stepped as decimal digits
+	if(unit.GetType() != Unit::UNIT_HEXNUM)
+	{
+		return ImGui::InputText(
+			label.c_str(), text, flags | ImGuiInputTextFlags_CallbackHistory, NumericStepCallback, &stepped);
+	}
+#else
+	(void)unit;
+#endif
+
+	return ImGui::InputText(label.c_str(), text, flags);
+}
+
 bool Dialog::TextInputWithImplicitApply(const string& label, string& currentValue, string& committedValue)
 {
 	bool dirty = currentValue != committedValue;
@@ -281,13 +356,29 @@ bool Dialog::UnitInputWithImplicitApply(
 {
 	bool dirty = unit.PrettyPrint(committedValue) != currentValue;
 
-	ImGui::InputText(label.c_str(), &currentValue);
+	bool stepped;
+	NumericInputText(label, &currentValue, 0, unit, stepped);
+	ImGuiID id = ImGui::GetItemID();
 
-	if(!ImGui::IsItemActive() && dirty )
+	//Up/Down arrows apply right away, while leaving the box active
+	if(stepped)
 	{
+		g_steppedItemId = id;
 		committedValue = unit.ParseString(currentValue);
 		currentValue = unit.PrettyPrint(committedValue);
 		return true;
+	}
+
+	if(!ImGui::IsItemActive() && dirty )
+	{
+		//If the last thing that happened was a step, that value was already applied
+		auto newValue = static_cast<float>(unit.ParseString(currentValue));
+		bool alreadyApplied = (g_steppedItemId == id) && (newValue == committedValue);
+		g_steppedItemId = 0;
+
+		committedValue = newValue;
+		currentValue = unit.PrettyPrint(committedValue);
+		return !alreadyApplied;
 	}
 
 	return false;
@@ -311,13 +402,29 @@ bool Dialog::UnitInputWithImplicitApply(
 {
 	bool dirty = unit.PrettyPrint(committedValue) != currentValue;
 
-	ImGui::InputText(label.c_str(), &currentValue);
+	bool stepped;
+	NumericInputText(label, &currentValue, 0, unit, stepped);
+	ImGuiID id = ImGui::GetItemID();
 
-	if(!ImGui::IsItemActive() && dirty )
+	//Up/Down arrows apply right away, while leaving the box active
+	if(stepped)
 	{
+		g_steppedItemId = id;
 		committedValue = unit.ParseString(currentValue);
 		currentValue = unit.PrettyPrint(committedValue);
 		return true;
+	}
+
+	if(!ImGui::IsItemActive() && dirty )
+	{
+		//If the last thing that happened was a step, that value was already applied
+		auto newValue = unit.ParseString(currentValue);
+		bool alreadyApplied = (g_steppedItemId == id) && (newValue == committedValue);
+		g_steppedItemId = 0;
+
+		committedValue = newValue;
+		currentValue = unit.PrettyPrint(committedValue);
+		return !alreadyApplied;
 	}
 
 	return false;
@@ -342,20 +449,41 @@ bool Dialog::UnitInputWithImplicitApply(
 	//	return renderEditableProperty(-1,label,currentValue,committedValue,unit,);
 	bool dirty = unit.PrettyPrintInt64(committedValue) != currentValue;
 
-	ImGui::InputText(label.c_str(), &currentValue);
+	bool stepped;
+	NumericInputText(label, &currentValue, 0, unit, stepped);
+	ImGuiID id = ImGui::GetItemID();
+
+	//Up/Down arrows apply right away, while leaving the box active
+	if(stepped)
+	{
+		g_steppedItemId = id;
+		if(currentValue.find(".") != string::npos)
+			committedValue = unit.ParseString(currentValue);
+		else
+			committedValue = unit.ParseStringInt64(currentValue);
+		currentValue = unit.PrettyPrintInt64(committedValue);
+		return true;
+	}
 
 	if(!ImGui::IsItemActive() && dirty )
 	{
+		int64_t newValue;
+
 		//Float path if the user input a decimal value like "3.5G"
 		if(currentValue.find(".") != string::npos)
-			committedValue = unit.ParseString(currentValue);
+			newValue = unit.ParseString(currentValue);
 
 		//Integer path otherwise for full precision
 		else
-			committedValue = unit.ParseStringInt64(currentValue);
+			newValue = unit.ParseStringInt64(currentValue);
 
+		//If the last thing that happened was a step, that value was already applied
+		bool alreadyApplied = (g_steppedItemId == id) && (newValue == committedValue);
+		g_steppedItemId = 0;
+
+		committedValue = newValue;
 		currentValue = unit.PrettyPrintInt64(committedValue);
-		return true;
+		return !alreadyApplied;
 	}
 
 	return false;
@@ -586,7 +714,16 @@ bool Dialog::renderEditableProperty(
 		ImGui::PushItemFlag(ImGuiItemFlags_AllowOverlap, true);
 		ImGui::PushStyleColor(ImGuiCol_Text, color);
 		if(changeFont) ImGui::PushFont(font.first, font.second);
-		if(ImGui::InputText(editLabel.c_str(), &currentValue, ImGuiInputTextFlags_EnterReturnsTrue))
+		bool stepped = false;
+		bool enterPressed;
+		if constexpr (std::is_same_v<T, std::string>)
+			enterPressed = ImGui::InputText(editLabel.c_str(), &currentValue, ImGuiInputTextFlags_EnterReturnsTrue);
+		else
+		{
+			enterPressed = NumericInputText(
+				editLabel, &currentValue, ImGuiInputTextFlags_EnterReturnsTrue, unit, stepped);
+		}
+		if(enterPressed)
 		{	// Input validated (but no apply button)
 			if(!explicitApply)
 			{	// Implcit apply => validate change
@@ -600,6 +737,33 @@ bool Dialog::renderEditableProperty(
 		if(changeFont) ImGui::PopFont();
 		ImGui::PopStyleColor();
 		ImGui::PopItemFlag();
+
+		//Up/Down arrows step a digit. Apply that right away and keep editing, unless the box needs an explicit apply
+		//(for something like a power supply setpoint it's the whole point of the button to not send every change).
+		//The box keeps showing the text as stepped until editing ends, since ImGui ignores the string while the box
+		//is active. We normalize the string itself so the change isn't applied a second time when editing stops.
+		if constexpr (!std::is_same_v<T, std::string>)
+		{
+			if(stepped && !explicitApply)
+			{
+				if constexpr (std::is_same_v<T, int64_t>)
+				{
+					if(currentValue.find(".") != string::npos)
+						committedValue = unit.ParseString(currentValue);
+					else
+						committedValue = unit.ParseStringInt64(currentValue);
+					currentValue = unit.PrettyPrintInt64(committedValue);
+				}
+				else
+				{
+					committedValue = static_cast<T>(unit.ParseString(currentValue));
+					currentValue = unit.PrettyPrint(committedValue);
+				}
+				changed = true;
+				g_steppedItemId = editId;
+			}
+		}
+
 		if(explicitApply && dirty)
 		{	// Add Apply button
 			//float buttonWidth = ImGui::GetFontSize() * 2;
@@ -711,6 +875,10 @@ bool Dialog::renderEditableProperty(
 		}
 		if(dirty)
 		{	// Content actually changed
+			T oldValue = committedValue;
+			bool alreadyApplied = (g_steppedItemId == editId);
+			g_steppedItemId = 0;
+
 			if constexpr (std::is_same_v<T, int64_t>)
 			{
 				//Float path if the user input a decimal value like "3.5G"
@@ -735,6 +903,15 @@ bool Dialog::renderEditableProperty(
 					currentValue = unit.PrettyPrint(committedValue);
 			}
 			changed = true;
+
+			//If the last thing that happened was a step, that value was already applied
+			if constexpr (!std::is_same_v<T, std::string>)
+			{
+				if(alreadyApplied && (committedValue == oldValue))
+					changed = false;
+			}
+			(void)oldValue;
+			(void)alreadyApplied;
 		}
 	}
 	else if(cancelEdit)

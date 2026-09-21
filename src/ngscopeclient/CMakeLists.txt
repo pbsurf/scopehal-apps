@@ -227,6 +227,12 @@ target_link_libraries(ngscopeclient
 	${PLATFORM_LIBS}
 	)
 
+#Up/Down arrows in numeric input boxes step the digit to the left of the cursor instead of moving between widgets
+option(NUMERIC_INPUT_ARROW_STEP "Up/Down arrows in numeric input boxes step the digit left of the cursor" ON)
+if(NUMERIC_INPUT_ARROW_STEP)
+	target_compile_definitions(ngscopeclient PRIVATE NUMERIC_INPUT_ARROW_STEP)
+endif()
+
 if(CMAKE_SIZEOF_VOID_P EQUAL 4)
 	target_compile_definitions(ngscopeclient
 		PRIVATE

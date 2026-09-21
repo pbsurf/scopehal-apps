@@ -11,6 +11,7 @@ add_executable(Primitives
 	IIOSDR.cpp
 	Sampling.cpp
 	UnitFormatting.cpp
+	UnitStepping.cpp
 )
 
 target_link_libraries(Primitives
