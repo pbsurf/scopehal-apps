@@ -90,6 +90,7 @@ public:
 	//Transmit LO (SDRs with a transmitter)
 	std::string m_txLoText;
 	int64_t m_txLo;
+	bool m_txLoValid;
 
 	//Spectrometer controls
 	std::string m_integrationText;
@@ -109,6 +110,7 @@ public:
 	StreamBrowserTxToneInfo()
 		: m_freq(0)
 		, m_amplitude(0)
+		, m_valid(false)
 	{}
 
 	std::string m_freqText;
@@ -116,6 +118,9 @@ public:
 
 	std::string m_amplitudeText;
 	float m_amplitude;
+
+	///@brief False until the text has been filled in from the radio
+	bool m_valid;
 };
 
 /**
@@ -126,10 +131,14 @@ class StreamBrowserTxInfo
 public:
 	StreamBrowserTxInfo()
 		: m_atten(0)
+		, m_attenValid(false)
 	{}
 
 	std::string m_attenText;
 	float m_atten;
+
+	///@brief False until the text has been filled in from the radio
+	bool m_attenValid;
 
 	std::vector<StreamBrowserTxToneInfo> m_tones;
 };
