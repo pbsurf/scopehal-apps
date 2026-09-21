@@ -99,7 +99,9 @@ include(CTest)
 set(BUILD_DOCS CACHE BOOL "Build end user documentation")
 set(BUILD_DEVDOCS CACHE BOOL "Build developer documentation")
 set(ANALYZE CACHE BOOL "Run static analysis on the code, requires cppcheck and clang-analyzer to be installed")
-set(DISABLE_PCH CACHE BOOL "Disable precompiled headers as this may break certain configurations")
+#Precompiled headers are off by default. They speed up a full build, but with the Makefile generators, adding or removing
+#a source file in a target that uses them recompiles the whole target. Turn this off to use them.
+set(DISABLE_PCH ON CACHE BOOL "Disable precompiled headers (set to OFF for faster full builds, but adding a source file then rebuilds the whole target)")
 set(BUILD_TESTING CACHE BOOL "Build unit tests")
 
 # Build with C++ 17 on Linux for maximum compatibility with older system
