@@ -3,6 +3,18 @@ project(ngscopeclient VERSION 0.2)
 include_directories(cmake) #WORKAROUND needed for find_package(Vulkan) for Vulkan SDK
 enable_language(CXX)
 
+# Linking this project is memory-hungry with the default bfd linker. Use mold instead if it's
+# installed, since it's much lighter on RAM; silently fall back to the platform default otherwise
+# so this is a no-op on machines without mold.
+option(USE_MOLD_LINKER_IF_AVAILABLE "Automatically use the mold linker if it is installed" ON)
+if(USE_MOLD_LINKER_IF_AVAILABLE AND NOT WIN32)
+	find_program(MOLD_LINKER_EXECUTABLE "mold")
+	if(MOLD_LINKER_EXECUTABLE)
+		message(STATUS "Found mold linker (${MOLD_LINKER_EXECUTABLE}), using it for all targets")
+		add_link_options("-fuse-ld=mold")
+	endif()
+endif()
+
 # Warn if platform is not 64-bit
 if(NOT (CMAKE_SIZEOF_VOID_P EQUAL 8))
 	message(WARNING "You are attempting to build on a 32-bit platform. While this may work and we may accept fixes "
