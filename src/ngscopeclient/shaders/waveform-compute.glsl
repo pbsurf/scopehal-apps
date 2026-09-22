@@ -52,6 +52,21 @@
 shared uint g_workingBuffer[MAX_HEIGHT];
 
 shared bool g_done;
+
+//Display detectors are only supported for analog waveforms drawn as lines
+#if defined(ANALOG_PATH) && !defined(HISTOGRAM_PATH)
+	#define DETECTOR_CAPABLE
+#endif
+
+//Detector modes (must match FFTFilter::DetectorType)
+#define DETECTOR_NORMAL	0
+#define DETECTOR_PEAK	1
+
+#ifdef DETECTOR_CAPABLE
+	//Peak detector: highest pixel row reached in the left boundary window, the column, and the right boundary window
+	shared int g_detectorMax[3];
+	#define DETECTOR_EMPTY	-2147483647
+#endif
 layout(local_size_x=1, local_size_y=ROWS_PER_BLOCK, local_size_z=1) in;
 
 //Global configuration for the run
@@ -74,6 +89,7 @@ layout(std430, push_constant) uniform constants
 	float yscale;
 	float yoff;
 	float persistScale;
+	uint detectorMode;
 };
 
 //The output texture data
@@ -207,6 +223,33 @@ float InterpolateY(vec2 left, vec2 right, float slope, float x)
 	return left.y + ( (x - left.x) * slope );
 }
 
+#ifdef DETECTOR_CAPABLE
+/**
+	@brief Updates the peak detector for window [wleft, wright] with the part of the segment inside it
+ */
+void UpdateDetectorWindow(uint n, vec2 left, vec2 right, float wleft, float wright)
+{
+	if( (right.x < wleft) || (left.x > wright) )
+		return;
+
+	#ifdef NO_INTERPOLATION
+		float ymax = left.y;
+	#else
+		float slope = (right.y - left.y) / (right.x - left.x);
+		float ya = left.y;
+		float yb = right.y;
+		if(left.x < wleft)
+			ya = InterpolateY(left, right, slope, wleft);
+		if(right.x > wright)
+			yb = InterpolateY(left, right, slope, wright);
+		float ymax = max(ya, yb);
+	#endif
+
+	//Clamp before converting so far offscreen values can't overflow
+	atomicMax(g_detectorMax[n], int(floor(clamp(ymax, -1.0, float(windowHeight)))));
+}
+#endif
+
 void main()
 {
 	//Abort if window height is too big, or if we're off the end of the window
@@ -225,18 +268,43 @@ void main()
 	bool l_done = false;
 
 	if(gl_LocalInvocationID.y == 0)
+	{
 		g_done = false;
+		#ifdef DETECTOR_CAPABLE
+			g_detectorMax[0] = DETECTOR_EMPTY;
+			g_detectorMax[1] = DETECTOR_EMPTY;
+			g_detectorMax[2] = DETECTOR_EMPTY;
+		#endif
+	}
+
+	//Right edge of the region this column needs samples from.
+	//The peak detector also looks at windows centred on each column boundary, which extend half a pixel
+	//into the neighboring columns. Both neighbors compute identical values for their shared window,
+	//so the filled spans always meet and the trace is continuous.
+	float xend = float(gl_GlobalInvocationID.x + 1);
+	#ifdef DETECTOR_CAPABLE
+		if(detectorMode == DETECTOR_PEAK)
+			xend += 0.5;
+	#endif
 
 	barrier();
 	memoryBarrierShared();
 
 	#ifdef DENSE_PACK
 		uint istart = uint(floor(gl_GlobalInvocationID.x / xscale)) + offset_samples;
+		#ifdef DETECTOR_CAPABLE
+			if(detectorMode == DETECTOR_PEAK)
+				istart = uint(max(int(floor((gl_GlobalInvocationID.x - 0.5) / xscale)) + int(offset_samples), 0));
+		#endif
 		uint iend = uint(floor((gl_GlobalInvocationID.x + 1) / xscale)) + offset_samples;
 		if(iend <= 0)
 			l_done = true;
 	#else
 		uint istart = xind[gl_GlobalInvocationID.x];
+		#ifdef DETECTOR_CAPABLE
+			if( (detectorMode == DETECTOR_PEAK) && (gl_GlobalInvocationID.x > 0) )
+				istart = xind[gl_GlobalInvocationID.x - 1];
+		#endif
 		if( (gl_GlobalInvocationID.x + 1) < windowWidth)
 		{
 			uint iend = xind[gl_GlobalInvocationID.x + 1];
@@ -283,6 +351,18 @@ void main()
 					vec2 right = left;
 					right.x += FETCH_DURATION(i) * xscale;
 				#endif
+			#endif
+
+			#ifdef DETECTOR_CAPABLE
+			if(detectorMode == DETECTOR_PEAK)
+			{
+				float x0 = float(gl_GlobalInvocationID.x);
+				UpdateDetectorWindow(0, left, right, x0 - 0.5, x0 + 0.5);
+				UpdateDetectorWindow(1, left, right, x0, x0 + 1);
+				UpdateDetectorWindow(2, left, right, x0 + 0.5, x0 + 1.5);
+				updating = false;
+			}
+			else
 			#endif
 
 			//Skip offscreen samples
@@ -357,7 +437,7 @@ void main()
 				updating = false;
 
 			//Check if we're at the end of the pixel
-			if(right.x > gl_GlobalInvocationID.x + 1)
+			if(right.x > xend)
 				l_done = true;
 		}
 
@@ -392,10 +472,31 @@ void main()
 	barrier();
 	memoryBarrierShared();
 
+	#ifdef DETECTOR_CAPABLE
+		//Peak detector fills from the lowest to the highest of the three maxima
+		int detLo = int(windowHeight);
+		int detHi = -1;
+		if(detectorMode == DETECTOR_PEAK)
+		{
+			for(int n=0; n<3; n++)
+			{
+				int v = g_detectorMax[n];
+				if(v == DETECTOR_EMPTY)
+					continue;
+				detLo = min(detLo, v);
+				detHi = max(detHi, v);
+			}
+		}
+	#endif
+
 	//Copy working buffer to float[] output and apply persistence if needed
 	for(uint y=gl_LocalInvocationID.y; y<windowHeight; y+= ROWS_PER_BLOCK)
 	{
 		float fout = g_workingBuffer[y] * alpha;
+		#ifdef DETECTOR_CAPABLE
+			if(detectorMode == DETECTOR_PEAK)
+				fout = ( (int(y) >= detLo) && (int(y) <= detHi) ) ? alpha : 0.0;
+		#endif
 		uint npix = (windowWidth * y) + gl_GlobalInvocationID.x;
 
 		if(persistScale != 0)

@@ -149,6 +149,7 @@ struct ConfigPushConstants
 	float yscale;
 	float yoff;
 	float persistScale;
+	uint32_t detectorMode;
 };
 
 class IndexSearchConstants

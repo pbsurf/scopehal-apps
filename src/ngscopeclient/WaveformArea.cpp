@@ -2603,6 +2603,17 @@ void WaveformArea::RasterizeAnalogOrDigitalWaveform(
 	float alpha_scaled = alpha / sqrt(samplesPerPixel);
 	alpha_scaled = min(1.0f, alpha_scaled) * 2;
 
+	//Display detector requested by the source filter (e.g. FFT), if any.
+	//Only supported for analog waveforms drawn as lines, not histograms or digital.
+	uint32_t detectorMode = 0;
+	auto f = dynamic_cast<Filter*>(stream.m_channel);
+	if(f && f->HasParameter("Detector") && (sadata || uadata) && !channel->ShouldFillUnder())
+		detectorMode = f->GetParameter("Detector").GetIntVal();
+
+	//Detectors draw a single trace rather than a density plot, so don't scale intensity by zoom
+	if(detectorMode != 0)
+		alpha_scaled = min(1.0f, alpha) * 2;
+
 	//Trigger phase can't go entirely in ConfigPushConstants::xoff due to limited dynamic range
 	//so pass only the fractional part there and put the integer part in innerxoff
 	int64_t triggerPhaseSamples	= data->m_triggerPhase / data->m_timescale;
@@ -2635,6 +2646,7 @@ void WaveformArea::RasterizeAnalogOrDigitalWaveform(
 		config.persistScale = m_parent->GetPersistDecay();
 	else
 		config.persistScale = 0;
+	config.detectorMode = detectorMode;
 
 	//Dispatch the shader
 	comp->Dispatch(cmdbuf, config, w, 1, 1);
