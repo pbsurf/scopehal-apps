@@ -100,6 +100,7 @@ public:
 	static void Tooltip(const std::string& str, bool allowDisabled = false);
 	static void HelpMarker(const std::string& str);
 	static void HelpMarker(const std::string& header, const std::vector<std::string>& bullets);
+	static bool TextMatchesValue(const std::string& text, double value, Unit unit);
 
 protected:
 	void RenderErrorPopup();

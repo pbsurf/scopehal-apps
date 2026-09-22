@@ -820,7 +820,8 @@ void StreamBrowserDialog::renderSdrTxProperties(shared_ptr<SCPISDR> sdr, SDRTran
 	//Attenuation applies to the whole path
 	Unit db(Unit::UNIT_DB);
 	auto atten = sdr->GetTxAttenuation(tx);
-	if(!txinfo.m_attenValid || (atten != txinfo.m_atten))
+	if(!txinfo.m_attenValid ||
+		( (atten != txinfo.m_atten) && !TextMatchesValue(txinfo.m_attenText, atten, db) ) )
 	{
 		txinfo.m_attenValid = true;
 		txinfo.m_atten = atten;
@@ -843,13 +844,14 @@ void StreamBrowserDialog::renderSdrTxProperties(shared_ptr<SCPISDR> sdr, SDRTran
 
 		//Check if anything changed under us (the radio may not be able to do exactly what we asked for)
 		auto freq = sdr->GetTxToneFrequency(tx, j);
-		if(!info.m_valid || (freq != info.m_freq))
+		if(!info.m_valid || ( (freq != info.m_freq) && !TextMatchesValue(info.m_freqText, freq, hz) ) )
 		{
 			info.m_freq = freq;
 			info.m_freqText = hz.PrettyPrintInt64(freq);
 		}
 		auto amplitude = sdr->GetTxToneAmplitude(tx, j);
-		if(!info.m_valid || (amplitude != info.m_amplitude))
+		if(!info.m_valid ||
+			( (amplitude != info.m_amplitude) && !TextMatchesValue(info.m_amplitudeText, amplitude, percent) ) )
 		{
 			info.m_valid = true;
 			info.m_amplitude = amplitude;
@@ -1491,7 +1493,7 @@ void StreamBrowserDialog::DoFrequencySettings(shared_ptr<Oscilloscope> scope)
 	{
 		//Check if it changed under us
 		auto txLo = sdr->GetTxLOFrequency();
-		if(!p->m_txLoValid || (txLo != p->m_txLo))
+		if(!p->m_txLoValid || ( (txLo != p->m_txLo) && !TextMatchesValue(p->m_txLoText, txLo, hz) ) )
 		{
 			p->m_txLoValid = true;
 			p->m_txLo = txLo;

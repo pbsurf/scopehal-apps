@@ -245,24 +245,19 @@ static ImGuiID g_steppedItemId = 0;
  */
 static string g_steppedItemText;
 
-#ifdef NUMERIC_INPUT_ARROW_STEP
-
-///@brief State shared with NumericStepCallback
-struct NumericStepData
-{
-	///@brief Set to true if the text was changed by a step
-	bool stepped;
-
-	///@brief If not null, text to replace the contents of the box with
-	const string* replaceText;
-};
+///@brief Text that is actually in the box in g_steppedItemId. This differs from g_steppedItemText after a step.
+static string g_steppedItemBox;
 
 /**
-	@brief Finds the end of the number at the start of a string (optional sign, digits, at most one decimal mark)
+	@brief Finds the end of the number in a string (optional leading space and sign, digits, at most one decimal mark)
+
+	@return		Index of the first character after the number
  */
 static int NumberEnd(const string& text)
 {
 	size_t i = 0;
+	while( (i < text.size()) && isspace(static_cast<unsigned char>(text[i])) )
+		i ++;
 	if( (i < text.size()) && ( (text[i] == '-') || (text[i] == '+') ) )
 		i ++;
 	bool mark = false;
@@ -281,6 +276,49 @@ static int NumberEnd(const string& text)
 	}
 	return static_cast<int>(i);
 }
+
+/**
+	@brief Checks if a value is the same as the number in a text box, as far as the text can tell
+
+	Instruments can't always do exactly what we ask, for example a DAC may have a step size that isn't a round number in
+	the units we show. If the value we got back only differs from the text beyond the digit after the last one shown,
+	the text is still a fair description of it, so showing the value instead would only add digits nobody asked for.
+
+	The size of the last digit shown is found by stepping it, so this handles prefixes, units and so on the same way
+	the Up/Down keys do.
+
+	@param text		Text of a numeric box
+	@param value	Value to compare to what the text says
+	@param unit		Unit of the text and value
+
+	@return			True if value is within a tenth of the last digit of text from what text says
+ */
+bool Dialog::TextMatchesValue(const string& text, double value, Unit unit)
+{
+	string stepped;
+	int cursor;
+	if(!Unit::StepNumericText(text, NumberEnd(text), true, stepped, cursor))
+		return false;
+
+	double typed = unit.ParseString(text);
+	double digit = fabs(unit.ParseString(stepped) - typed);
+	if(digit == 0)
+		return (value == typed);
+
+	return fabs(value - typed) < (digit / 10);
+}
+
+#ifdef NUMERIC_INPUT_ARROW_STEP
+
+///@brief State shared with NumericStepCallback
+struct NumericStepData
+{
+	///@brief Set to true if the text was changed by a step
+	bool stepped;
+
+	///@brief If not null, text to replace the contents of the box with
+	const string* replaceText;
+};
 
 /**
 	@brief InputText callback that steps the digit to the left of the cursor when Up/Down is pressed
@@ -792,20 +830,39 @@ bool Dialog::renderEditableProperty(
 		if(changeFont) ImGui::PushFont(font.first, font.second);
 		bool stepped = false;
 		bool enterPressed;
+		string boxText;
+		bool boxChanged = false;
+		(void)boxChanged;
 		if constexpr (std::is_same_v<T, std::string>)
 			enterPressed = ImGui::InputText(editLabel.c_str(), &currentValue, ImGuiInputTextFlags_EnterReturnsTrue);
 		else
 		{
 			//If we stepped this box and whatever owns the value has since changed the text (because the instrument
 			//limited the value, for example) the box needs to be told since it's not going to notice
+			//(unless the new text says the same thing as what's in the box, as far as the box can tell, in which
+			//case we don't want to add digits that aren't wanted or undo a step)
 			string replaceText;
-			bool replace = (g_steppedItemId == editId) && (currentValue != g_steppedItemText);
+			string startText = currentValue;
+			bool replace = (g_steppedItemId == editId) && (currentValue != g_steppedItemText) &&
+				!TextMatchesValue(g_steppedItemBox, static_cast<double>(committedValue), unit);
 			if(replace)
 				replaceText = currentValue;
 
 			enterPressed = NumericInputText(
 				editLabel, &currentValue, ImGuiInputTextFlags_EnterReturnsTrue, unit, stepped,
 				replace ? &replaceText : nullptr);
+
+			//What's in the box now, if that changed this frame
+			if(replace)
+			{
+				boxText = replaceText;
+				boxChanged = true;
+			}
+			else if(currentValue != startText)
+			{
+				boxText = currentValue;
+				boxChanged = true;
+			}
 		}
 		if(enterPressed)
 		{	// Input validated (but no apply button)
@@ -849,7 +906,11 @@ bool Dialog::renderEditableProperty(
 
 			//Remember what the box has in it, so we can tell if it changes behind its back
 			if(g_steppedItemId == editId)
+			{
+				if(boxChanged)
+					g_steppedItemBox = boxText;
 				g_steppedItemText = currentValue;
+			}
 		}
 
 		if(explicitApply && dirty)
