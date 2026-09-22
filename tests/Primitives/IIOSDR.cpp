@@ -599,12 +599,22 @@ TEST_CASE("IIOSDR_Transmit")
 	REQUIRE(sdr->GetTxToneCount(1) == 2);
 	REQUIRE(sdr->GetTxToneCount(2) == 0);
 
-	//We adopt what the DDS is doing: tone 1 running at 1 MHz and 25%, tone 2 off
+	//We adopt what the DDS is doing: tone 1 running at 1 MHz and 25%, tone 2 off (muted via amplitude, not disabled)
 	REQUIRE(sdr->GetTxLOFrequency() == 2400000000);
-	REQUIRE(sdr->IsTxToneEnabled(0, 0));
 	REQUIRE(sdr->GetTxToneFrequency(0, 0) == 1000000);
 	REQUIRE(sdr->GetTxToneAmplitude(0, 0) == Catch::Approx(0.25));
-	REQUIRE(!sdr->IsTxToneEnabled(0, 1));
+	REQUIRE(sdr->GetTxToneAmplitude(0, 1) == Catch::Approx(0));
+
+	//The DDS itself is always left enabled: a tone is muted via amplitude=0, since toggling "raw" per tone can
+	//glitch other, unrelated tones on this DDS core
+	{
+		int64_t f;
+		double s;
+		int64_t p;
+		int64_t r;
+		ReadDDS(ctx, "TX1_I_F2", f, s, p, r);
+		REQUIRE(r == 1);
+	}
 
 	//Limits: tones can be up to half the sample rate either side of the LO
 	auto range = sdr->GetTxToneFrequencyRange(0);
@@ -621,9 +631,8 @@ TEST_CASE("IIOSDR_Transmit")
 	int64_t raw;
 	sdr->SetTxToneFrequency(1, 1, 250000);
 	sdr->SetTxToneAmplitude(1, 1, 0.5);
-	sdr->SetTxToneEnabled(1, 1, true);
 	ReadDDS(ctx, "TX2_I_F2", freq, scale, phase, raw);
-	REQUIRE(raw == 0);
+	REQUIRE(scale == Catch::Approx(0));
 	sdr->BackgroundProcessing();
 
 	//Both I and Q run at the tone frequency, 90 degrees apart, with I leading for a positive frequency
@@ -657,12 +666,12 @@ TEST_CASE("IIOSDR_Transmit")
 	REQUIRE(phase == 90000);
 	REQUIRE(sdr->GetTxToneFrequency(1, 1) == -300000);
 
-	//Turning a tone off
-	sdr->SetTxToneEnabled(1, 1, false);
+	//Turning a tone off: muted via amplitude, DDS stays enabled
+	sdr->SetTxToneAmplitude(1, 1, 0);
 	sdr->BackgroundProcessing();
 	ReadDDS(ctx, "TX2_I_F2", freq, scale, phase, raw);
-	REQUIRE(raw == 0);
-	REQUIRE(!sdr->IsTxToneEnabled(1, 1));
+	REQUIRE(scale == Catch::Approx(0));
+	REQUIRE(raw == 1);
 
 	//Out of range requests are clamped
 	sdr->SetTxToneFrequency(0, 0, 5000000);
@@ -800,8 +809,6 @@ TEST_CASE("IIOSDR_TransmitSessionRoundTrip")
 	sdr->SetTxToneAmplitude(0, 0, 0.75);
 	sdr->SetTxToneFrequency(1, 1, 456000);
 	sdr->SetTxToneAmplitude(1, 1, 0.125);
-	sdr->SetTxToneEnabled(1, 1, true);
-	sdr->SetTxToneEnabled(0, 0, false);
 	sdr->BackgroundProcessing();
 
 	IDTable table;
@@ -818,10 +825,8 @@ TEST_CASE("IIOSDR_TransmitSessionRoundTrip")
 	REQUIRE(sdr2->GetTxLOFrequency() == 868000000);
 	REQUIRE(sdr2->GetTxToneFrequency(0, 0) == -123000);
 	REQUIRE(sdr2->GetTxToneAmplitude(0, 0) == Catch::Approx(0.75));
-	REQUIRE(!sdr2->IsTxToneEnabled(0, 0));
 	REQUIRE(sdr2->GetTxToneFrequency(1, 1) == 456000);
 	REQUIRE(sdr2->GetTxToneAmplitude(1, 1) == Catch::Approx(0.125));
-	REQUIRE(sdr2->IsTxToneEnabled(1, 1));
 
 	//And it all made it to the radio
 	int64_t freq;
@@ -831,7 +836,7 @@ TEST_CASE("IIOSDR_TransmitSessionRoundTrip")
 	ReadDDS(ctx2, "TX1_Q_F1", freq, scale, phase, raw);
 	REQUIRE(freq == 123000);
 	REQUIRE(phase == 90000);
-	REQUIRE(raw == 0);
+	REQUIRE(raw == 1);
 	ReadDDS(ctx2, "TX2_I_F2", freq, scale, phase, raw);
 	REQUIRE(freq == 456000);
 	REQUIRE(raw == 1);

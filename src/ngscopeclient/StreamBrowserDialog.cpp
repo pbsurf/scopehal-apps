@@ -859,10 +859,6 @@ void StreamBrowserDialog::renderSdrTxProperties(shared_ptr<SCPISDR> sdr, SDRTran
 		}
 
 		ImGui::Text("Tone %zu", j+1);
-		startBadgeLine();
-		bool enabled = sdr->IsTxToneEnabled(tx, j);
-		if(renderOnOffToggle("##toneEnable", true, enabled))
-			sdr->SetTxToneEnabled(tx, j, enabled);
 
 		if(renderEditableProperty(
 			dwidth,
