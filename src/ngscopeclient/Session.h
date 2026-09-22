@@ -35,6 +35,10 @@
 #ifndef Session_h
 #define Session_h
 
+#include "../scopehal/BERT.h"
+#include "../scopehal/FilterGraphExecutor.h"
+#include "../scopehal/Load.h"
+
 class MainWindow;
 class WaveformArea;
 class DisplayedChannel;

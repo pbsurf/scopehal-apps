@@ -43,6 +43,11 @@
 #include "../../scopehal/DensityFunctionWaveform.h"
 
 #include "imgui_internal.h"	//for SetItemUsingMouseWheel
+#include "../scopehal/BERT.h"
+#include "../scopehal/FilterGraphExecutor.h"
+#include "../scopehal/PeakDetectionFilter.h"
+#include "../scopehal/StreamGroupDescriptor.h"
+#include "../scopehal/StreamGroupDescriptor_inlines.h"
 
 #define FILL_SIZE 34
 #define LINE_SIZE 32

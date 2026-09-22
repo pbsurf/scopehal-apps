@@ -42,6 +42,8 @@
 #include "../../lib/scopehal/ComplexChannel.h"
 #include "../../lib/scopeprotocols/scopeprotocols.h"
 #include "Filters.h"
+#include "../../lib/scopehal/FilterGraphExecutor.h"
+#include "../../lib/scopehal/SCPISDR.h"
 
 using namespace std;
 

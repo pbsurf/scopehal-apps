@@ -36,6 +36,7 @@
 #define BERTOutputChannelDialog_h
 
 #include "EmbeddableDialog.h"
+#include "../scopehal/BERT.h"
 
 class BERTOutputChannelDialog : public EmbeddableDialog
 {

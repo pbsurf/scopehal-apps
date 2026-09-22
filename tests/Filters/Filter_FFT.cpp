@@ -42,6 +42,8 @@
 #include "../../lib/scopehal/TestWaveformSource.h"
 #include "../../lib/scopeprotocols/scopeprotocols.h"
 #include "Filters.h"
+#include "../../lib/scopehal/FilterGraphExecutor.h"
+#include "../../lib/scopehal/PeakDetectionFilter.h"
 
 #include <fftw3.h>
 

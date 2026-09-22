@@ -33,6 +33,7 @@
 	@brief Unit tests for the IIO transport and the simulated (mock) IIO context
  */
 #include "../../lib/scopehal/scopehal.h"
+#include "../../lib/scopehal/SCPIIIOTransport.h"
 
 #ifdef HAS_IIO
 

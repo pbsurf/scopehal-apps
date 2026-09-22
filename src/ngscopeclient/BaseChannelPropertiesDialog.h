@@ -36,6 +36,7 @@
 #define BaseChannelPropertiesDialog_h
 
 #include "EmbeddableDialog.h"
+#include "../scopehal/SinkNode.h"
 class MainWindow;
 
 class BaseChannelPropertiesDialog

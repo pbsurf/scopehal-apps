@@ -37,6 +37,7 @@
 #include "../scopehal/Instrument.h"
 #include "../scopehal/RohdeSchwarzHMC804xPowerSupply.h"
 #include "../scopehal/RohdeSchwarzHMC8012Multimeter.h"
+#include "../scopehal/SCPISocketTransport.h"
 
 using namespace std;
 

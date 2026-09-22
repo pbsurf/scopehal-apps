@@ -39,6 +39,7 @@
 #include "Session.h"
 
 #include "../scopehal/PacketDecoder.h"
+#include "../scopehal/SinkNode.h"
 
 class MainWindow;
 

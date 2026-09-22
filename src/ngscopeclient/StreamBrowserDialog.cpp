@@ -36,6 +36,7 @@
 #include "ngscopeclient.h"
 #include "StreamBrowserDialog.h"
 #include "MainWindow.h"
+#include "../scopehal/VIOOutputChannel.h"
 
 using namespace std;
 

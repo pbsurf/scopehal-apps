@@ -37,6 +37,7 @@
 #include "../scopehal/MockOscilloscope.h"
 #include "ManageInstrumentsDialog.h"
 #include "MainWindow.h"
+#include "../scopehal/MockInstrument.h"
 
 using namespace std;
 

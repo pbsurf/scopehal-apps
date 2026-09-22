@@ -46,6 +46,12 @@
 #include "MeasurementsDialog.h"
 #include "../scopehal/DensityFunctionWaveform.h"
 #include "../scopeprotocols/DigitalConstantFilter.h"
+#include "../scopehal/DigitalIOChannel.h"
+#include "../scopehal/DigitalInputChannel.h"
+#include "../scopehal/DigitalOutputChannel.h"
+#include "../scopehal/RFSignalGeneratorChannel.h"
+#include "../scopehal/VIOOutputChannel.h"
+#include "../scopehal/VectorGPIOChannel.h"
 
 using namespace std;
 

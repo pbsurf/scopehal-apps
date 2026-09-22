@@ -36,6 +36,7 @@
 #define DigitalInputChannelDialog_h
 
 #include "EmbeddableDialog.h"
+#include "../scopehal/DigitalInputChannel.h"
 
 class MainWindow;
 

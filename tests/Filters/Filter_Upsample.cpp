@@ -42,6 +42,7 @@
 #include "../../lib/scopehal/TestWaveformSource.h"
 #include "../../lib/scopeprotocols/scopeprotocols.h"
 #include "Filters.h"
+#include "../../lib/scopehal/FilterGraphExecutor.h"
 
 using namespace std;
 

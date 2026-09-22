@@ -51,6 +51,15 @@
 #include "../scopehal/MockPowerSupply.h"
 #include "../scopeprotocols/EyePattern.h"
 #include "../scopehal/IBM8b10bWaveform.h"
+#include "../scopehal/CANChannel.h"
+#include "../scopehal/SCPIBERT.h"
+#include "../scopehal/SCPILoad.h"
+#include "../scopehal/SCPIMiscInstrument.h"
+#include "../scopehal/SCPIMultimeter.h"
+#include "../scopehal/SCPIRFSignalGenerator.h"
+#include "../scopehal/SCPISDR.h"
+#include "../scopehal/SCPISpectrometer.h"
+#include "../scopehal/SCPIVNA.h"
 
 #include <fstream>
 #include <cinttypes>

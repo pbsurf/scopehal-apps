@@ -37,6 +37,8 @@
 
 #include "Dialog.h"
 #include "Session.h"
+#include "../scopehal/Load.h"
+#include "../scopehal/SCPILoad.h"
 
 #include <future>
 

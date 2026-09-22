@@ -42,6 +42,7 @@
 #include "../scopehal/ActionProvider.h"
 #include "../scopeprotocols/TouchstoneImportFilter.h"
 #include "FilterGraphEditor.h"
+#include "../scopehal/ImportFilter.h"
 
 using namespace std;
 

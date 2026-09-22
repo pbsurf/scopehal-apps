@@ -35,6 +35,7 @@
 
 #include "ngscopeclient.h"
 #include "RFGeneratorDialog.h"
+#include "../scopehal/RFSignalGeneratorChannel.h"
 
 using namespace std;
 

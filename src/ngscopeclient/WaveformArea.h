@@ -35,6 +35,9 @@
 #ifndef WaveformArea_h
 #define WaveformArea_h
 
+#include "../scopehal/SinkNode.h"
+
+class BERTInputChannel;
 class WaveformArea;
 class WaveformGroup;
 class MainWindow;

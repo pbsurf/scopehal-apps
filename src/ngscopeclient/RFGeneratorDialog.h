@@ -38,6 +38,8 @@
 #include "Dialog.h"
 #include "RollingBuffer.h"
 #include "Session.h"
+#include "../scopehal/RFSignalGenerator.h"
+#include "../scopehal/SCPIRFSignalGenerator.h"
 
 class RFGeneratorChannelUIState
 {

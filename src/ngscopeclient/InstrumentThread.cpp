@@ -36,6 +36,13 @@
 #include "pthread_compat.h"
 #include "Session.h"
 #include "LoadChannel.h"
+#include "../scopehal/Load.h"
+#include "../scopehal/MultimeterChannel.h"
+#include "../scopehal/SCPIBERT.h"
+#include "../scopehal/SCPIMiscInstrument.h"
+#include "../scopehal/SCPIMultimeter.h"
+#include "../scopehal/SCPIRFSignalGenerator.h"
+#include "../scopehal/SCPISDR.h"
 
 using namespace std;
 

@@ -33,6 +33,8 @@
 	@brief Unit tests for the IIO SDR driver, using the simulated (mock) IIO device
  */
 #include "../../lib/scopehal/scopehal.h"
+#include "../../lib/scopehal/SCPIIIOTransport.h"
+#include "../../lib/scopehal/SCPISDR.h"
 
 #ifdef HAS_IIO
 

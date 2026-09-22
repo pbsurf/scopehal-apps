@@ -29,6 +29,10 @@
 #ifndef Event_h
 #define Event_h
 
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
+
 /**
 	@brief Synchronization primitive for sending a "something is ready" notification to a thread
 

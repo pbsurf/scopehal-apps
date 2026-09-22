@@ -36,6 +36,7 @@
 #define BERTInputChannelDialog_h
 
 #include "EmbeddableDialog.h"
+#include "../scopehal/BERT.h"
 
 class MainWindow;
 

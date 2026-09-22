@@ -70,6 +70,8 @@
 #include "ScopeDeskewWizard.h"
 #include "TriggerPropertiesDialog.h"
 #include "../scopeprotocols/TouchstoneImportFilter.h"
+#include "../scopehal/ImportFilter.h"
+#include "../scopehal/SCPINullTransport.h"
 
 #include <imgui_markdown.h>
 #include <filesystem>

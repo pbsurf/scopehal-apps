@@ -54,6 +54,12 @@
 #include "PreferenceTypes.h"
 
 #include "../scopehal/PacketDecoder.h"
+#include "../scopehal/SCPIBERT.h"
+#include "../scopehal/SCPILoad.h"
+#include "../scopehal/SCPIMultimeter.h"
+#include "../scopehal/SCPIRFSignalGenerator.h"
+#include "../scopehal/StreamGroupDescriptor.h"
+#include "../scopehal/StreamGroupDescriptor_inlines.h"
 
 class MeasurementsDialog;
 class HistoryDialog;

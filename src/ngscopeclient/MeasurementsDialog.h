@@ -37,6 +37,7 @@
 
 #include "Dialog.h"
 #include "Session.h"
+#include "../scopehal/SinkNode.h"
 
 class MeasurementsDialog
 	: public Dialog

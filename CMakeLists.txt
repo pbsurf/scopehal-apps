@@ -38,6 +38,9 @@ endif()
 # Needed for vk::PhysicalDevicePortabilitySubsetFeaturesKHR
 add_compile_definitions(VK_ENABLE_BETA_EXTENSIONS=1)
 
+# In-tree code includes rarely used scopehal headers explicitly rather than getting them all via scopehal.h
+add_compile_definitions(SCOPEHAL_NO_LEGACY_INCLUDES)
+
 # Git is used for git-describe based version generation if we have it
 find_package(Git)
 

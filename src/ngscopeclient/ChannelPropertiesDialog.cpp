@@ -36,6 +36,7 @@
 #include "ngscopeclient.h"
 #include "MainWindow.h"
 #include "ChannelPropertiesDialog.h"
+#include "../scopehal/SCPISDR.h"
 #include <imgui_node_editor.h>
 
 using namespace std;

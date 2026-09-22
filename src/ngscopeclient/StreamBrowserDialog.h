@@ -39,6 +39,11 @@
 
 #include "Dialog.h"
 #include "Session.h"
+#include "../scopehal/MultimeterChannel.h"
+#include "../scopehal/SCPISDR.h"
+#include "../scopehal/SCPISpectrometer.h"
+#include "../scopehal/StreamGroupDescriptor.h"
+#include "../scopehal/StreamGroupDescriptor_inlines.h"
 
 class MainWindow;
 

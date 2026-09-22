@@ -37,6 +37,7 @@
 
 #include "Dialog.h"
 #include "Session.h"
+#include "../scopehal/SCPIBERT.h"
 
 #include <future>
 
