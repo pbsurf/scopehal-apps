@@ -817,24 +817,26 @@ void StreamBrowserDialog::renderSdrTxProperties(shared_ptr<SCPISDR> sdr, SDRTran
 	auto& tones = txinfo.m_tones;
 	tones.resize(ntones);
 
-	//Attenuation applies to the whole path
+	//Gain applies to the whole path. The hardware only exposes an attenuation control, so gain is
+	//represented as its negative: increasing the gain value decreases the attenuation, which
+	//increases the output power.
 	Unit db(Unit::UNIT_DB);
-	auto atten = sdr->GetTxAttenuation(tx);
-	if(!txinfo.m_attenValid ||
-		( (atten != txinfo.m_atten) && !TextMatchesValue(txinfo.m_attenText, atten, db) ) )
+	auto gain = -sdr->GetTxAttenuation(tx);
+	if(!txinfo.m_gainValid ||
+		( (gain != txinfo.m_gain) && !TextMatchesValue(txinfo.m_gainText, gain, db) ) )
 	{
-		txinfo.m_attenValid = true;
-		txinfo.m_atten = atten;
-		txinfo.m_attenText = db.PrettyPrint(atten);
+		txinfo.m_gainValid = true;
+		txinfo.m_gain = gain;
+		txinfo.m_gainText = db.PrettyPrint(gain);
 	}
 	auto attenRange = sdr->GetTxAttenuationRange(tx);
-	char attenHelp[128];
-	snprintf(attenHelp, sizeof(attenHelp),
-		"Attenuation of the transmit path, from %.0f to %.0f dB. More attenuation means less output power.",
-		attenRange.first, attenRange.second);
-	if(renderEditableProperty(dwidth, "Attenuation", txinfo.m_attenText, txinfo.m_atten, db, attenHelp))
+	char gainHelp[128];
+	snprintf(gainHelp, sizeof(gainHelp),
+		"Gain of the transmit path, from %.0f to %.0f dB. More gain means more output power.",
+		-attenRange.second, -attenRange.first);
+	if(renderEditableProperty(dwidth, "Gain", txinfo.m_gainText, txinfo.m_gain, db, gainHelp))
 	{
-		sdr->SetTxAttenuation(tx, txinfo.m_atten);
+		sdr->SetTxAttenuation(tx, -txinfo.m_gain);
 	}
 
 	for(size_t j=0; j<ntones; j++)

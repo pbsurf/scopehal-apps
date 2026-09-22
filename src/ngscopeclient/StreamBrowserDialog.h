@@ -130,15 +130,15 @@ class StreamBrowserTxInfo
 {
 public:
 	StreamBrowserTxInfo()
-		: m_atten(0)
-		, m_attenValid(false)
+		: m_gain(0)
+		, m_gainValid(false)
 	{}
 
-	std::string m_attenText;
-	float m_atten;
+	std::string m_gainText;
+	float m_gain;
 
 	///@brief False until the text has been filled in from the radio
-	bool m_attenValid;
+	bool m_gainValid;
 
 	std::vector<StreamBrowserTxToneInfo> m_tones;
 };
