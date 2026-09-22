@@ -1488,12 +1488,14 @@ void StreamBrowserDialog::DoFrequencySettings(shared_ptr<Oscilloscope> scope)
 	if(sdr && (sdr->GetTxChannelCount() > 0))
 	{
 		//Check if it changed under us
+		//The LO is tuned in exact Hz, so show full precision rather than PrettyPrintInt64()'s default of 4 digits
+		//after the decimal point (which loses sub-100kHz precision at GHz magnitudes)
 		auto txLo = sdr->GetTxLOFrequency();
 		if(!p->m_txLoValid || ( (txLo != p->m_txLo) && !TextMatchesValue(p->m_txLoText, txLo, hz) ) )
 		{
 			p->m_txLoValid = true;
 			p->m_txLo = txLo;
-			p->m_txLoText = hz.PrettyPrintInt64(txLo);
+			p->m_txLoText = hz.PrettyPrintInt64WithResolution(txLo, 1);
 		}
 
 		if(renderEditableProperty(
@@ -1508,7 +1510,7 @@ void StreamBrowserDialog::DoFrequencySettings(shared_ptr<Oscilloscope> scope)
 
 			//Update with the value the driver settled on
 			p->m_txLo = sdr->GetTxLOFrequency();
-			p->m_txLoText = hz.PrettyPrintInt64(p->m_txLo);
+			p->m_txLoText = hz.PrettyPrintInt64WithResolution(p->m_txLo, 1);
 		}
 	}
 }
