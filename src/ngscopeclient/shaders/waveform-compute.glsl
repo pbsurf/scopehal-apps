@@ -63,7 +63,7 @@ shared bool g_done;
 #define DETECTOR_PEAK	1
 
 #ifdef DETECTOR_CAPABLE
-	//Peak detector: highest pixel row reached in the left boundary window, the column, and the right boundary window
+	//Peak detector: highest pixel row reached in the left neighbor column, this column, and the right neighbor column
 	shared int g_detectorMax[3];
 	#define DETECTOR_EMPTY	-2147483647
 #endif
@@ -278,13 +278,12 @@ void main()
 	}
 
 	//Right edge of the region this column needs samples from.
-	//The peak detector also looks at windows centred on each column boundary, which extend half a pixel
-	//into the neighboring columns. Both neighbors compute identical values for their shared window,
-	//so the filled spans always meet and the trace is continuous.
+	//The peak detector also needs the peaks of both neighboring columns. Every column computes identical
+	//values for a given column, so each can connect its trace to its neighbors without a second pass.
 	float xend = float(gl_GlobalInvocationID.x + 1);
 	#ifdef DETECTOR_CAPABLE
 		if(detectorMode == DETECTOR_PEAK)
-			xend += 0.5;
+			xend += 1;
 	#endif
 
 	barrier();
@@ -294,7 +293,7 @@ void main()
 		uint istart = uint(floor(gl_GlobalInvocationID.x / xscale)) + offset_samples;
 		#ifdef DETECTOR_CAPABLE
 			if(detectorMode == DETECTOR_PEAK)
-				istart = uint(max(int(floor((gl_GlobalInvocationID.x - 0.5) / xscale)) + int(offset_samples), 0));
+				istart = uint(max(int(floor((float(gl_GlobalInvocationID.x) - 1) / xscale)) + int(offset_samples), 0));
 		#endif
 		uint iend = uint(floor((gl_GlobalInvocationID.x + 1) / xscale)) + offset_samples;
 		if(iend <= 0)
@@ -357,9 +356,9 @@ void main()
 			if(detectorMode == DETECTOR_PEAK)
 			{
 				float x0 = float(gl_GlobalInvocationID.x);
-				UpdateDetectorWindow(0, left, right, x0 - 0.5, x0 + 0.5);
+				UpdateDetectorWindow(0, left, right, x0 - 1, x0);
 				UpdateDetectorWindow(1, left, right, x0, x0 + 1);
-				UpdateDetectorWindow(2, left, right, x0 + 0.5, x0 + 1.5);
+				UpdateDetectorWindow(2, left, right, x0 + 1, x0 + 2);
 				updating = false;
 			}
 			else
@@ -473,18 +472,24 @@ void main()
 	memoryBarrierShared();
 
 	#ifdef DETECTOR_CAPABLE
-		//Peak detector fills from the lowest to the highest of the three maxima
+		//Peak detector draws a line through the column peaks: each column fills from its own peak to the
+		//midpoint towards each neighbor. Both columns compute the same midpoint between them, so the trace
+		//is continuous, and each jump is split between the two columns rather than drawn as a vertical step.
 		int detLo = int(windowHeight);
 		int detHi = -1;
-		if(detectorMode == DETECTOR_PEAK)
+		if( (detectorMode == DETECTOR_PEAK) && (g_detectorMax[1] != DETECTOR_EMPTY) )
 		{
-			for(int n=0; n<3; n++)
+			int peak = g_detectorMax[1];
+			detLo = peak;
+			detHi = peak;
+			for(int n=0; n<3; n+=2)
 			{
 				int v = g_detectorMax[n];
 				if(v == DETECTOR_EMPTY)
 					continue;
-				detLo = min(detLo, v);
-				detHi = max(detHi, v);
+				int mid = (peak + v) >> 1;
+				detLo = min(detLo, mid);
+				detHi = max(detHi, mid);
 			}
 		}
 	#endif
