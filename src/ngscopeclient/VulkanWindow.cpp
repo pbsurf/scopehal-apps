@@ -87,6 +87,8 @@ VulkanWindow::VulkanWindow(const string& title, shared_ptr<QueueHandle> queue, b
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 	io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+	//Keep dialogs dragged outside the main window out of the taskbar and window switcher
+	io.ConfigViewportsNoTaskBarIcon = true;
 	// Check for environment variable DPI scaling override
 	const char *font_scale_override = getenv("NGSCOPECLIENT_FONT_SCALE");
 	const char *ui_scale_override = getenv("NGSCOPECLIENT_UI_SCALE");

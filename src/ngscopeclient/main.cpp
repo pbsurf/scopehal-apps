@@ -49,6 +49,21 @@ GuiLogSink* g_guiLog;
 void Relaunch(int argc, char* argv[]);
 #endif
 
+/**
+	@brief Check if an event should close the application
+
+	SDL only sends SDL_QUIT once the last window is closed, so while an ImGui viewport (e.g. a dialog dragged outside
+	the main window) is open we also have to watch for the main window itself being closed.
+ */
+static bool IsQuitEvent(const SDL_Event& event)
+{
+	if(event.type == SDL_QUIT)
+		return true;
+	return (event.type == SDL_WINDOWEVENT) &&
+		(event.window.event == SDL_WINDOWEVENT_CLOSE) &&
+		(event.window.windowID == SDL_GetWindowID(g_mainWindow->GetWindow()));
+}
+
 static void print_help(FILE* stream)
 {
 	fprintf(stream,
@@ -376,7 +391,7 @@ int main(int argc, char* argv[])
 					{
 						hadEvent = true;
 						ImGui_ImplSDL2_ProcessEvent(&event);
-						if(event.type == SDL_QUIT)
+						if(IsQuitEvent(event))
 							g_mainWindow->RequestClose();
 					}
 				}
@@ -387,7 +402,7 @@ int main(int argc, char* argv[])
 			{
 				hadEvent = true;
 				ImGui_ImplSDL2_ProcessEvent(&event);
-				if(event.type == SDL_QUIT)
+				if(IsQuitEvent(event))
 					g_mainWindow->RequestClose();
 			}
 
