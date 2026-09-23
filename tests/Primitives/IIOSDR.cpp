@@ -181,8 +181,6 @@ TEST_CASE("IIOSDR_Configuration")
 
 	//The limits the radio publishes are used to clamp requests right away, so the UI shows the truth immediately.
 	//This is an AD9363, which is more restricted than an AD9361.
-	sdr->SetSpan(50000000);
-	REQUIRE(sdr->GetSpan() == 20000000);
 	sdr->SetCenterFrequency(0, 100000000);
 	REQUIRE(sdr->GetCenterFrequency(0) == 325000000);
 	sdr->SetCenterFrequency(0, 5000000000);
@@ -192,12 +190,11 @@ TEST_CASE("IIOSDR_Configuration")
 	REQUIRE(ctx->ReadChannelAttrInt(phy, "altvoltage0", true, "frequency", v));
 	REQUIRE(v == 325000000);
 	REQUIRE(sdr->GetCenterFrequency(0) == 325000000);
-	REQUIRE(ctx->ReadChannelAttrInt(phy, "voltage0", false, "rf_bandwidth", v));
-	REQUIRE(v == 20000000);
 
-	//The AD9361 goes lower and wider
+	//The AD9361 goes lower and wider (the sample rate has to be up too, or a span this wide would be swept)
 	IIOContext* ctx2;
 	auto sdr2 = MakeSDR("mock:ad9361", ctx2);
+	sdr2->SetSampleRate(61440000);
 	sdr2->SetCenterFrequency(0, 100000000);
 	sdr2->SetSpan(50000000);
 	REQUIRE(sdr2->GetCenterFrequency(0) == 100000000);
@@ -317,6 +314,120 @@ TEST_CASE("IIOSDR_Acquire")
 	q = chan->GetData(1);
 	REQUIRE(i->m_timescale == 200000000);
 	REQUIRE(ToneMagnitude(i, q, 500000) > 0.45);
+}
+
+TEST_CASE("IIOSDR_Sweep")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9363", ctx);
+	auto chan = sdr->GetChannel(0);
+	int64_t v;
+
+	//The AD9363 can capture 20 MHz at once, so a 60 MHz span has to be swept
+	const size_t depth = 4096;
+	sdr->SetSampleDepth(depth);
+	sdr->SetSampleRate(20000000);
+	sdr->SetCenterFrequency(0, 2420000000);
+	sdr->SetSpan(60000000);
+	REQUIRE(sdr->GetSpan() == 60000000);
+	sdr->BackgroundProcessing();
+	REQUIRE(sdr->GetSpan() == 60000000);
+	REQUIRE(sdr->GetCenterFrequency(0) == 2420000000);
+	REQUIRE(ctx->ReadChannelAttrInt(phy, "voltage0", false, "rf_bandwidth", v));
+	REQUIRE(v == 20000000);
+
+	//Steps are 80% of the bandwidth, rounded down to a whole number of FFT bins, centered on the span
+	const double bin = 20000000.0 / depth;
+	const double step = floor(16000000 / bin) * bin;
+	const size_t nsteps = 4;
+
+	//A single trigger goes all the way across the sweep, then stops
+	sdr->StartSingleTrigger();
+	for(size_t i=0; i<nsteps; i++)
+	{
+		REQUIRE(sdr->IsTriggerArmed());
+		REQUIRE(sdr->PollTrigger() == Oscilloscope::TRIGGER_MODE_TRIGGERED);
+		REQUIRE(sdr->AcquireData());
+		REQUIRE(sdr->PopPendingWaveform());
+
+		double expected = 2420000000 + (i - (nsteps - 1) / 2.0) * step;
+		REQUIRE(fabs(chan->GetScalarValue(2) - expected) < 256);
+		REQUIRE(ctx->ReadChannelAttrInt(phy, "altvoltage0", true, "frequency", v));
+		REQUIRE(fabs(v - expected) < 1);
+	}
+	REQUIRE(!sdr->IsTriggerArmed());
+
+	//The tone at 2.4125 GHz shows up in the second step
+	double lo2 = 2420000000 - step / 2;
+	sdr->StartSingleTrigger();
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	REQUIRE(fabs(chan->GetScalarValue(2) - lo2) < 256);
+	REQUIRE(ToneMagnitude(chan->GetData(0), chan->GetData(1), 2412000000 - lo2) > 0.35);
+
+	//Changing some other setting mid sweep doesn't disturb it, and the LO isn't mistaken for the center frequency
+	sdr->SetGainMode(0, "manual");
+	sdr->BackgroundProcessing();
+	REQUIRE(sdr->GetCenterFrequency(0) == 2420000000);
+	REQUIRE(sdr->GetSpan() == 60000000);
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	REQUIRE(fabs(chan->GetScalarValue(2) - (lo2 + step)) < 256);
+
+	//Changing the sweep starts it over
+	sdr->SetCenterFrequency(0, 2430000000);
+	sdr->BackgroundProcessing();
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	REQUIRE(fabs(chan->GetScalarValue(2) - (2430000000 - 1.5 * step)) < 256);
+	sdr->Stop();
+
+	//Narrow enough to capture at once: no more sweeping, and the LO goes back to the center
+	sdr->SetSpan(10000000);
+	sdr->BackgroundProcessing();
+	REQUIRE(ctx->ReadChannelAttrInt(phy, "altvoltage0", true, "frequency", v));
+	REQUIRE(v == 2430000000);
+	REQUIRE(ctx->ReadChannelAttrInt(phy, "voltage0", false, "rf_bandwidth", v));
+	REQUIRE(v == 10000000);
+	sdr->StartSingleTrigger();
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	REQUIRE(!sdr->IsTriggerArmed());
+	REQUIRE(fabs(chan->GetScalarValue(2) - 2430000000.0) < 256);
+
+	//Lowering the sample rate below the span starts sweeping again, with the analog bandwidth following the rate
+	sdr->SetSampleRate(5000000);
+	sdr->BackgroundProcessing();
+	REQUIRE(ctx->ReadChannelAttrInt(phy, "voltage0", false, "rf_bandwidth", v));
+	REQUIRE(v == 5000000);
+	REQUIRE(sdr->GetSpan() == 10000000);
+	sdr->StartSingleTrigger();
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	REQUIRE(sdr->IsTriggerArmed());
+	REQUIRE(chan->GetScalarValue(2) < 2430000000.0 - 1000000);
+	sdr->Stop();
+
+	//The sweep never goes outside the tuning range
+	sdr->SetSampleRate(20000000);
+	sdr->SetCenterFrequency(0, 3800000000);
+	sdr->SetSpan(100000000);
+	sdr->BackgroundProcessing();
+	sdr->StartSingleTrigger();
+	double last = 0;
+	for(size_t i=0; (i < 20) && sdr->IsTriggerArmed(); i++)
+	{
+		REQUIRE(sdr->AcquireData());
+		REQUIRE(sdr->PopPendingWaveform());
+		double lo = chan->GetScalarValue(2);
+		REQUIRE(lo > last);
+		REQUIRE(lo <= 3800000000.0 + 256);
+		last = lo;
+	}
+	REQUIRE(!sdr->IsTriggerArmed());
+	REQUIRE(fabs(last - 3800000000.0) < 256);
 }
 
 TEST_CASE("IIOSDR_ContinuousAndDisabledChannels")

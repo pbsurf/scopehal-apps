@@ -6,6 +6,7 @@ add_executable(Filters
 	Filter_ComplexFFT.cpp
 	Filter_EyePattern.cpp
 	Filter_FIR.cpp
+	Filter_SpectrumStitch.cpp
 	Filter_Subtract.cpp
 	Filter_Upsample.cpp
 
