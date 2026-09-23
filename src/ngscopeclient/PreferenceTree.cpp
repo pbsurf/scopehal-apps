@@ -213,8 +213,15 @@ namespace internal
 						break;
 
 					case PreferenceType::Font:
-						this->m_pref.SetFont(FontDescription(n["path"].as<string>(), n["size"].as<float>()));
+					{
+						//An empty path means the font file couldn't be located when the preferences were saved.
+						//Keep the default path rather than persisting the broken value.
+						auto path = n["path"].as<string>();
+						if(path.empty())
+							path = this->m_pref.GetFont().first;
+						this->m_pref.SetFont(FontDescription(path, n["size"].as<float>()));
 						break;
+					}
 
 					case PreferenceType::Enum:
 					{
