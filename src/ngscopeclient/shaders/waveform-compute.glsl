@@ -61,11 +61,22 @@ shared bool g_done;
 //Detector modes (must match FFTFilter::DetectorType)
 #define DETECTOR_NORMAL	0
 #define DETECTOR_PEAK	1
+#define DETECTOR_AVERAGE	2
 
 #ifdef DETECTOR_CAPABLE
-	//Peak detector: highest pixel row reached in the left neighbor column, this column, and the right neighbor column
+	//Detector state for the left neighbor column, this column, and the right neighbor column
+
+	//Peak detector: highest pixel row reached
 	shared int g_detectorMax[3];
 	#define DETECTOR_EMPTY	-2147483647
+
+	//Average detector: integral of pixel Y over X, and total X length covered, both in fixed point.
+	//Fixed point integer sums don't depend on which thread or column added each segment, so neighboring
+	//columns get identical results for a shared column.
+	shared int g_detectorSum[3];
+	shared uint g_detectorLen[3];
+	#define DETECTOR_AVG_SCALE	65536.0
+	#define DETECTOR_AVG_YLIMIT	4096.0
 #endif
 layout(local_size_x=1, local_size_y=ROWS_PER_BLOCK, local_size_z=1) in;
 
@@ -225,15 +236,17 @@ float InterpolateY(vec2 left, vec2 right, float slope, float x)
 
 #ifdef DETECTOR_CAPABLE
 /**
-	@brief Updates the peak detector for window [wleft, wright] with the part of the segment inside it
+	@brief Updates the detector for window [wleft, wright] with the part of the segment inside it
  */
 void UpdateDetectorWindow(uint n, vec2 left, vec2 right, float wleft, float wright)
 {
 	if( (right.x < wleft) || (left.x > wright) )
 		return;
 
+	//Y at the ends of the part of the segment inside the window
 	#ifdef NO_INTERPOLATION
-		float ymax = left.y;
+		float ya = left.y;
+		float yb = left.y;
 	#else
 		float slope = (right.y - left.y) / (right.x - left.x);
 		float ya = left.y;
@@ -242,11 +255,22 @@ void UpdateDetectorWindow(uint n, vec2 left, vec2 right, float wleft, float wrig
 			ya = InterpolateY(left, right, slope, wleft);
 		if(right.x > wright)
 			yb = InterpolateY(left, right, slope, wright);
-		float ymax = max(ya, yb);
 	#endif
 
-	//Clamp before converting so far offscreen values can't overflow
-	atomicMax(g_detectorMax[n], int(floor(clamp(ymax, -1.0, float(windowHeight)))));
+	if(detectorMode == DETECTOR_PEAK)
+	{
+		//Clamp before converting so far offscreen values can't overflow
+		atomicMax(g_detectorMax[n], int(floor(clamp(max(ya, yb), -1.0, float(windowHeight)))));
+	}
+	else
+	{
+		//Integral of the (linear) segment over its length inside the window.
+		//Clamp Y so far offscreen values can't overflow the fixed point sum.
+		float len = min(right.x, wright) - max(left.x, wleft);
+		float ymean = clamp(0.5 * (ya + yb), -DETECTOR_AVG_YLIMIT, DETECTOR_AVG_YLIMIT);
+		atomicAdd(g_detectorSum[n], int(round(len * ymean * DETECTOR_AVG_SCALE)));
+		atomicAdd(g_detectorLen[n], uint(round(len * DETECTOR_AVG_SCALE)));
+	}
 }
 #endif
 
@@ -271,18 +295,21 @@ void main()
 	{
 		g_done = false;
 		#ifdef DETECTOR_CAPABLE
-			g_detectorMax[0] = DETECTOR_EMPTY;
-			g_detectorMax[1] = DETECTOR_EMPTY;
-			g_detectorMax[2] = DETECTOR_EMPTY;
+			for(int n=0; n<3; n++)
+			{
+				g_detectorMax[n] = DETECTOR_EMPTY;
+				g_detectorSum[n] = 0;
+				g_detectorLen[n] = 0;
+			}
 		#endif
 	}
 
 	//Right edge of the region this column needs samples from.
-	//The peak detector also needs the peaks of both neighboring columns. Every column computes identical
+	//Detectors also need the values of both neighboring columns. Every column computes identical
 	//values for a given column, so each can connect its trace to its neighbors without a second pass.
 	float xend = float(gl_GlobalInvocationID.x + 1);
 	#ifdef DETECTOR_CAPABLE
-		if(detectorMode == DETECTOR_PEAK)
+		if(detectorMode != DETECTOR_NORMAL)
 			xend += 1;
 	#endif
 
@@ -292,7 +319,7 @@ void main()
 	#ifdef DENSE_PACK
 		uint istart = uint(floor(gl_GlobalInvocationID.x / xscale)) + offset_samples;
 		#ifdef DETECTOR_CAPABLE
-			if(detectorMode == DETECTOR_PEAK)
+			if(detectorMode != DETECTOR_NORMAL)
 				istart = uint(max(int(floor((float(gl_GlobalInvocationID.x) - 1) / xscale)) + int(offset_samples), 0));
 		#endif
 		uint iend = uint(floor((gl_GlobalInvocationID.x + 1) / xscale)) + offset_samples;
@@ -301,7 +328,7 @@ void main()
 	#else
 		uint istart = xind[gl_GlobalInvocationID.x];
 		#ifdef DETECTOR_CAPABLE
-			if( (detectorMode == DETECTOR_PEAK) && (gl_GlobalInvocationID.x > 0) )
+			if( (detectorMode != DETECTOR_NORMAL) && (gl_GlobalInvocationID.x > 0) )
 				istart = xind[gl_GlobalInvocationID.x - 1];
 		#endif
 		if( (gl_GlobalInvocationID.x + 1) < windowWidth)
@@ -353,7 +380,7 @@ void main()
 			#endif
 
 			#ifdef DETECTOR_CAPABLE
-			if(detectorMode == DETECTOR_PEAK)
+			if(detectorMode != DETECTOR_NORMAL)
 			{
 				float x0 = float(gl_GlobalInvocationID.x);
 				UpdateDetectorWindow(0, left, right, x0 - 1, x0);
@@ -472,22 +499,38 @@ void main()
 	memoryBarrierShared();
 
 	#ifdef DETECTOR_CAPABLE
-		//Peak detector draws a line through the column peaks: each column fills from its own peak to the
-		//midpoint towards each neighbor. Both columns compute the same midpoint between them, so the trace
-		//is continuous, and each jump is split between the two columns rather than drawn as a vertical step.
+		//Detector value (pixel row) for the left neighbor column, this column, and the right neighbor column
+		int det[3] = int[3](DETECTOR_EMPTY, DETECTOR_EMPTY, DETECTOR_EMPTY);
+		if(detectorMode == DETECTOR_PEAK)
+		{
+			for(int n=0; n<3; n++)
+				det[n] = g_detectorMax[n];
+		}
+		else if(detectorMode == DETECTOR_AVERAGE)
+		{
+			for(int n=0; n<3; n++)
+			{
+				if(g_detectorLen[n] == 0)
+					continue;
+				float avg = float(g_detectorSum[n]) / float(g_detectorLen[n]);
+				det[n] = int(floor(clamp(avg, -1.0, float(windowHeight))));
+			}
+		}
+
+		//Draw a line through the column values: each column fills from its own value to the midpoint
+		//towards each neighbor. Both columns compute the same midpoint between them, so the trace is
+		//continuous, and each jump is split between the two columns rather than drawn as a vertical step.
 		int detLo = int(windowHeight);
 		int detHi = -1;
-		if( (detectorMode == DETECTOR_PEAK) && (g_detectorMax[1] != DETECTOR_EMPTY) )
+		if( (detectorMode != DETECTOR_NORMAL) && (det[1] != DETECTOR_EMPTY) )
 		{
-			int peak = g_detectorMax[1];
-			detLo = peak;
-			detHi = peak;
+			detLo = det[1];
+			detHi = det[1];
 			for(int n=0; n<3; n+=2)
 			{
-				int v = g_detectorMax[n];
-				if(v == DETECTOR_EMPTY)
+				if(det[n] == DETECTOR_EMPTY)
 					continue;
-				int mid = (peak + v) >> 1;
+				int mid = (det[1] + det[n]) >> 1;
 				detLo = min(detLo, mid);
 				detHi = max(detHi, mid);
 			}
@@ -499,7 +542,7 @@ void main()
 	{
 		float fout = g_workingBuffer[y] * alpha;
 		#ifdef DETECTOR_CAPABLE
-			if(detectorMode == DETECTOR_PEAK)
+			if(detectorMode != DETECTOR_NORMAL)
 				fout = ( (int(y) >= detLo) && (int(y) <= detHi) ) ? alpha : 0.0;
 		#endif
 		uint npix = (windowWidth * y) + gl_GlobalInvocationID.x;
