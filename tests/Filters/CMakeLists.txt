@@ -5,6 +5,7 @@ add_executable(Filters
 	Filter_ACRMS.cpp
 	Filter_ComplexFFT.cpp
 	Filter_EyePattern.cpp
+	Filter_FFT_Peaks.cpp
 	Filter_FIR.cpp
 	Filter_SpectrumStitch.cpp
 	Filter_Subtract.cpp

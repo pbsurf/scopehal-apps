@@ -1670,15 +1670,32 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 	auto textColor = prefs.GetColor("Appearance.Peaks.peak_text_color");
 	auto mousePos = ImGui::GetMousePos();
 	float springMaxLength = 15 * ImGui::GetFontSize();
+
+	//Peak positions are interpolated to a fraction of a bin, widths are whole bins
+	auto uwfm = dynamic_cast<UniformWaveformBase*>(stream.GetData());
+	int64_t binsize = uwfm ? uwfm->m_timescale : 0;
+	auto xunit = stream.GetXAxisUnits();
+
 	for(size_t i=0; i<channel->m_peakLabels.size(); i++)
 	{
 		auto& label = channel->m_peakLabels[i];
 
+		//Widths are measured to the first bin at or below half maximum on each side, so are an upper bound,
+		//and the narrowest peak measures as two bins
+		string fwhm;
+		if(binsize > 0)
+		{
+			fwhm = (label.m_fwhm <= 2*binsize) ? "FWHM < " : "FWHM = ";
+			fwhm += xunit.PrettyPrintInt64WithResolution(llround(label.m_fwhm), binsize);
+		}
+		else
+			fwhm = "FWHM = " + xunit.PrettyPrint(label.m_fwhm);
+
 		//Figure out text size
 		string str =
-			"X = " + stream.GetXAxisUnits().PrettyPrintInt64(label.m_peakXpos, Unit::MAX_INT64_DECIMALS) + "\n" +
+			"X = " + xunit.PrettyPrintInt64WithResolution(label.m_peakXpos, binsize / 10.0) + "\n" +
 			"Y = " + stream.GetYAxisUnits().PrettyPrint(label.m_peakYpos) + "\n" +
-			"FWHM = " + stream.GetXAxisUnits().PrettyPrint(label.m_fwhm);
+			fwhm;
 		auto textSizePixels = ImGui::CalcTextSize(str.c_str());
 
 		//Create rectangle for box around centroid
