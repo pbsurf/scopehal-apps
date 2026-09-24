@@ -1,71 +1,36 @@
 # ngscopeclient and scopehal-apps
 
-This is the top level repository for ngscopeclient, as well as the unit tests for libscopehal.
+This is a fork of [ngscopeclient/scopehal-apps](https://github.com/ngscopeclient/scopehal-apps).  Due to the use of AI here, forks of this repo should not submit pull requests to the original ngscopeclient.
 
-Project website: [https://www.ngscopeclient.org](https://www.ngscopeclient.org)
+**New features**
 
-## Changes in this fork
+* SDR support for AD936x radios (ADALM-PLUTO etc.) via optional [libiio](https://github.com/analogdevicesinc/libiio): RX frequency, bandwidth, sample rate and gain
+* SDR transmit: DDS tones with frequency/amplitude, TX gain and TX LO in the stream browser
+* SDR sweep: spans wider than one capture sweep the LO, and the new Spectrum Stitch filter joins the captures into one spectrum
+* Complex FFT filter for I/Q data
+* Detector setting (Normal/Peak/Average) for drawing FFT and Spectrum Stitch
+* Plot interaction: drag to pan, Ctrl+drag box zoom, double click an axis to autofit, pinch zoom and touch improvements
+* Windowing and input ported from GLFW to SDL2, enabling touch input support
+* Up/Down in numeric boxes steps the digit left of the cursor
+* Recent Instruments section in Manage Instruments
 
-This is a fork of [ngscopeclient/scopehal-apps](https://github.com/ngscopeclient/scopehal-apps). The `lib` (scopehal) and
-`doc` (scopehal-docs) submodules also carry changes, and are forks too. Compared with upstream:
+**Minor features and bug fixes**
 
-**Software defined radio (ADALM-PLUTO and other AD9361/AD9363 radios)**
-
-* Optional [libiio](https://github.com/analogdevicesinc/libiio) support (0.x API only, enabled automatically if found): an
-  `iio` transport and an `iio` driver for AD936x based radios, with center frequency, bandwidth, sample
-  rate and gain control. Limits come from the radio, and USB-attached radios are listed when adding an instrument.
-* A simulated radio (use the path `mock:` or `mock:ad9361`) for development without hardware. It has been tested only against
-  this simulation and **not yet against a real radio**.
-* Receive gain mode and gain are shown in the stream browser and the channel properties dialog in place of attenuation
-  for radios that have gain control. The stream browser no longer shows the offset and range of I/Q streams, which only
-  affect plotting (they are still in the channel properties dialog), or an RBW field for instruments that don't have one.
-* Transmit paths of radios with a DDS core are shown in the stream browser, with a gain setting (the radio's transmit
-  attenuation, negated) and two tones per path with frequency and amplitude controls, and a TX LO setting shared by all
-  paths, shown at full 1 Hz precision. Set a tone's amplitude to 0 to mute it.
-* New Complex FFT filter for I/Q data.
-
-**Spectrum display**
-
-* The FFT filters have a Detector setting that controls how bins sharing a pixel column are drawn: Normal (intensity
-  graded, as before), Peak (a line through the highest value in each column, like a spectrum analyzer's peak detector,
-  so narrow peaks stay visible at any zoom) or Average (a line through the mean of each column; for dB data this is a
-  log average).
-
-**User interface**
-
-* Plot interaction: dragging pans the plot when there are no cursors, Ctrl+drag zooms to a box, double click/tap on an
-  axis autofits it, pinch zoom and other touch improvements, and precise axis labels and cursor positions when zoomed far in.
-* Windowing and input ported from GLFW to SDL2.
-* Up/Down in numeric input boxes now step the digit to the left of the cursor and apply immediately, instead of moving
-  between boxes. Boxes with an Apply button only edit the text. Turn this off with `-DNUMERIC_INPUT_ARROW_STEP=OFF`.
-* Manage Instruments has a Recent Instruments section with Connect and Delete buttons. Fixed reopening a recent instrument
-  whose path ends in a colon (such as `mock:`).
-* Numeric boxes keep the value as typed when the instrument can only set it approximately (amplitude 1% no longer reads
-  back as 1.001%), and a box being stepped with Up/Down updates if the instrument then limits or rounds the value.
-* Better responsiveness in event-driven (power saving) mode.
-* New `--reconnect` and `--offline` options to skip the reconnect prompt when opening a session from the command line.
-
-**Fixes and testing aids**
-
-* Simulated function generator (`demofuncgen`) for demonstration and UI testing, saved and loaded with sessions.
-* Fixed a crash in the FFT filter on an empty input waveform, and value formatting that dropped digits
-  (`1.0004 GHz` was shown as `1 GHz`).
-* Fixed staircase function generator shapes loading as a sine wave from a saved session.
-* Fixed SDR channels losing their stream types when a session is loaded, which stopped the center frequency from being
-  connected to the Complex FFT filter, and SDR transmit fields showing blank when the radio's value is zero.
-* Downsample filter: the output keeps the input's X axis unit (so it stays on a frequency axis after an FFT), the
-  antialiasing filter now smooths as much as intended, and a factor of zero or less reports a proper error.
-
-**Build**
-
-* Precompiled headers are now off by default (`DISABLE_PCH=ON`). With the Makefile generators, adding a source file to a
-  target that uses them rebuilds the whole target. Use `-DDISABLE_PCH=OFF` for faster full builds.
-* In-tree builds use a slimmer `scopehal.h` that no longer includes rarely used headers, so changing one of them
-  rebuilds far fewer files. Out-of-tree code that includes `scopehal.h` is unaffected.
-* The [mold](https://github.com/rui314/mold) linker is used automatically when installed, which needs much less memory
-  than the default linker (turn off with `-DUSE_MOLD_LINKER_IF_AVAILABLE=OFF`). `instrumented-build.sh` wraps a build
-  and logs rebuild and memory usage information to `build-logs/`.
-* Submodule URLs work for a recursive clone of this fork.
+* Precise axis labels and cursor positions when zoomed far in
+* Receive gain replaces attenuation in the stream browser and channel properties for radios with gain control
+* Numeric boxes keep the typed value when the instrument rounds it, and update while being stepped if it changes
+* A bare number typed in a numeric box keeps the unit and prefix shown before ("2" in a "1 MHz" box is 2 MHz)
+* `--reconnect` and `--offline` options to skip the reconnect prompt when opening a session from the command line
+* Better responsiveness in event-driven (power saving) mode
+* Simulated function generator (demofuncgen) for demos and UI testing
+* Peak markers show frequency to a tenth of a bin, and FWHM as an upper bound at the two-bin minimum
+* Fixed FFT peak detection ignoring the Peak Window (it reported every local maximum as a peak)
+* Fixed unit parsing that read a unit's first letter as a prefix ("5 mV" in millivolts, "2 m" in meters)
+* Fixed FFT crash on an empty input, and value formatting dropping digits ("1.0004 GHz" shown as "1 GHz")
+* Fixed staircase function generator shapes loading as sine, and SDR channels losing stream types on session load
+* Fixed empty saved font paths overriding the default fonts
+* Build: slimmer `scopehal.h` for in-tree builds, so changing a rarely used header rebuilds far fewer files
+* Build: [mold](https://github.com/rui314/mold) linker used when installed
 
 ## TODO
 
