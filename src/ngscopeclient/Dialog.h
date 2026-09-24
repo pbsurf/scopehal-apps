@@ -101,6 +101,7 @@ public:
 	static void HelpMarker(const std::string& str);
 	static void HelpMarker(const std::string& header, const std::vector<std::string>& bullets);
 	static bool TextMatchesValue(const std::string& text, double value, Unit unit);
+	static std::string WithPreviousUnit(const std::string& text, const std::string& previous, Unit unit);
 
 protected:
 	void RenderErrorPopup();

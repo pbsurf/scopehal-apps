@@ -383,7 +383,9 @@ void PreferenceDialog::ProcessPreference(Preference& pref)
 					//Input box
 					if(ImGui::InputText(label.c_str(), &m_preferenceTemporaries[id]))
 					{
-						pref.SetReal(unit.ParseString(m_preferenceTemporaries[id]));
+						//A number typed without a unit gets the one the box showed
+						auto text = WithPreviousUnit(m_preferenceTemporaries[id], unit.PrettyPrint(pref.GetReal()), unit);
+						pref.SetReal(unit.ParseString(text));
 						m_preferenceTemporaries[id] = unit.PrettyPrint(pref.GetReal());
 					}
 				}

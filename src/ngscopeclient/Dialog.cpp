@@ -278,6 +278,40 @@ static int NumberEnd(const string& text)
 }
 
 /**
+	@brief Gives a number typed without a unit the prefix and unit that the box showed before editing
+
+	If a box showed "1 MHz" and the user types "2", they mean 2 MHz rather than 2 Hz.
+
+	@param text		Text of the box
+	@param previous	What the box showed before it was edited
+	@param unit		Unit of the value
+
+	@return			text, with the prefix and unit of previous appended if text is just a number
+ */
+string Dialog::WithPreviousUnit(const string& text, const string& previous, Unit unit)
+{
+	if(unit.GetType() == Unit::UNIT_HEXNUM)
+		return text;
+
+	//Is the text just a number?
+	size_t end = NumberEnd(text);
+	if(text.find_first_not_of(" \t", end) != string::npos)
+		return text;
+	if(text.find_first_of("0123456789") == string::npos)
+		return text;
+
+	//Did the previous text have a number followed by a unit?
+	size_t prevEnd = NumberEnd(previous);
+	if(previous.find_first_of("0123456789") >= prevEnd)
+		return text;
+	size_t suffix = previous.find_first_not_of(" \t", prevEnd);
+	if(suffix == string::npos)
+		return text;
+
+	return text.substr(0, end) + " " + previous.substr(suffix);
+}
+
+/**
 	@brief Checks if a value is the same as the number in a text box, as far as the text can tell
 
 	Instruments can't always do exactly what we ask, for example a DAC may have a step size that isn't a round number in
@@ -478,6 +512,7 @@ bool Dialog::UnitInputWithImplicitApply(
 	if(stepped)
 	{
 		g_steppedItemId = id;
+		currentValue = WithPreviousUnit(currentValue, unit.PrettyPrint(committedValue), unit);
 		committedValue = unit.ParseString(currentValue);
 		currentValue = unit.PrettyPrint(committedValue);
 		return true;
@@ -485,6 +520,9 @@ bool Dialog::UnitInputWithImplicitApply(
 
 	if(!ImGui::IsItemActive() && dirty )
 	{
+		//A number typed without a unit gets the one the box showed
+		currentValue = WithPreviousUnit(currentValue, unit.PrettyPrint(committedValue), unit);
+
 		//If the last thing that happened was a step, that value was already applied
 		auto newValue = static_cast<float>(unit.ParseString(currentValue));
 		bool alreadyApplied = (g_steppedItemId == id) && (newValue == committedValue);
@@ -524,6 +562,7 @@ bool Dialog::UnitInputWithImplicitApply(
 	if(stepped)
 	{
 		g_steppedItemId = id;
+		currentValue = WithPreviousUnit(currentValue, unit.PrettyPrint(committedValue), unit);
 		committedValue = unit.ParseString(currentValue);
 		currentValue = unit.PrettyPrint(committedValue);
 		return true;
@@ -531,6 +570,9 @@ bool Dialog::UnitInputWithImplicitApply(
 
 	if(!ImGui::IsItemActive() && dirty )
 	{
+		//A number typed without a unit gets the one the box showed
+		currentValue = WithPreviousUnit(currentValue, unit.PrettyPrint(committedValue), unit);
+
 		//If the last thing that happened was a step, that value was already applied
 		auto newValue = unit.ParseString(currentValue);
 		bool alreadyApplied = (g_steppedItemId == id) && (newValue == committedValue);
@@ -571,6 +613,7 @@ bool Dialog::UnitInputWithImplicitApply(
 	if(stepped)
 	{
 		g_steppedItemId = id;
+		currentValue = WithPreviousUnit(currentValue, unit.PrettyPrintInt64(committedValue), unit);
 		if(currentValue.find(".") != string::npos)
 			committedValue = unit.ParseString(currentValue);
 		else
@@ -581,6 +624,9 @@ bool Dialog::UnitInputWithImplicitApply(
 
 	if(!ImGui::IsItemActive() && dirty )
 	{
+		//A number typed without a unit gets the one the box showed
+		currentValue = WithPreviousUnit(currentValue, unit.PrettyPrintInt64(committedValue), unit);
+
 		int64_t newValue;
 
 		//Float path if the user input a decimal value like "3.5G"
@@ -889,6 +935,7 @@ bool Dialog::renderEditableProperty(
 			{
 				if constexpr (std::is_same_v<T, int64_t>)
 				{
+					currentValue = WithPreviousUnit(currentValue, unit.PrettyPrintInt64(committedValue), unit);
 					if(currentValue.find(".") != string::npos)
 						committedValue = unit.ParseString(currentValue);
 					else
@@ -897,6 +944,7 @@ bool Dialog::renderEditableProperty(
 				}
 				else
 				{
+					currentValue = WithPreviousUnit(currentValue, unit.PrettyPrint(committedValue), unit);
 					committedValue = static_cast<T>(unit.ParseString(currentValue));
 					currentValue = unit.PrettyPrint(committedValue);
 				}
@@ -1024,6 +1072,12 @@ bool Dialog::renderEditableProperty(
 		}
 		if(dirty)
 		{	// Content actually changed
+			//A number typed without a unit gets the one the box showed
+			if constexpr (std::is_same_v<T, int64_t>)
+				currentValue = WithPreviousUnit(currentValue, unit.PrettyPrintInt64(committedValue), unit);
+			else if constexpr (!std::is_same_v<T, std::string>)
+				currentValue = WithPreviousUnit(currentValue, unit.PrettyPrint(committedValue), unit);
+
 			T oldValue = committedValue;
 			bool alreadyApplied = (g_steppedItemId == editId);
 			g_steppedItemId = 0;

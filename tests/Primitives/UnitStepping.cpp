@@ -275,3 +275,24 @@ TEST_CASE("Unit_StepNumericText_RepeatedSteps")
 	REQUIRE(text == "994 MHz");
 	REQUIRE(cursor == 3);
 }
+
+TEST_CASE("Unit_ParseString_UnitIsNotPrefix")
+{
+	//"m" on its own is meters, not a milli prefix
+	Unit pm(Unit::UNIT_PM);
+	REQUIRE(fabs(pm.ParseString("2 m") - 2e12) < 1);
+	REQUIRE(fabs(pm.ParseString("2 mm") - 2e9) < 1);
+	REQUIRE(pm.ParseStringInt64("2 m") == 2000000000000LL);
+	REQUIRE(pm.ParseStringInt64("2 mm") == 2000000000LL);
+
+	//UNIT_MILLIVOLTS is always shown in mV with no other prefix
+	Unit mv(Unit::UNIT_MILLIVOLTS);
+	REQUIRE(fabs(mv.ParseString("5 mV") - 5) < 1e-9);
+
+	//Prefixes still work where the unit doesn't start with one
+	Unit volts(Unit::UNIT_VOLTS);
+	REQUIRE(fabs(volts.ParseString("2 mV") - 2e-3) < 1e-12);
+	REQUIRE(fabs(volts.ParseString("2m") - 2e-3) < 1e-12);
+	Unit hz(Unit::UNIT_HZ);
+	REQUIRE(fabs(hz.ParseString("2 MHz") - 2e6) < 1e-6);
+}
