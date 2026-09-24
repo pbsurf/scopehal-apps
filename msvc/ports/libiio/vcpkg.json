@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "libiio",
+  "version": "0.26",
+  "description": "Library for interfacing with Linux IIO devices (0.x API, as required by scopehal)",
+  "homepage": "https://github.com/analogdevicesinc/libiio",
+  "license": "LGPL-2.1-or-later",
+  "supports": "!uwp",
+  "dependencies": [
+    "libxml2",
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    }
+  ],
+  "default-features": [
+    "usb"
+  ],
+  "features": {
+    "usb": {
+      "description": "libusb backend (ADALM-PLUTO over USB)",
+      "dependencies": [
+        "libusb"
+      ]
+    }
+  }
+}

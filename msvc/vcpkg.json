@@ -1,0 +1,49 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "ngscopeclient",
+  "version-string": "0.2",
+  "description": "Test and measurement remote control and analysis suite",
+  "homepage": "https://github.com/ngscopeclient/scopehal-apps",
+  "license": "BSD-3-Clause",
+  "builtin-baseline": "dc1232a6e05dcc49703091e83743e3b4df9b9b7c",
+  "dependencies": [
+    "zlib",
+    "libpng",
+    "yaml-cpp",
+    "libsigcpp",
+    "sdl2",
+    "hidapi",
+    "vulkan-headers",
+    "vulkan-loader",
+    "glslang",
+    "spirv-tools",
+    "shaderc",
+    {
+      "name": "pkgconf",
+      "host": true
+    }
+  ],
+  "default-features": [
+    "iio"
+  ],
+  "features": {
+    "iio": {
+      "description": "Analog Devices IIO SDR support (ADALM-PLUTO etc) via libiio 0.x",
+      "dependencies": [
+        "libiio"
+      ]
+    },
+    "tests": {
+      "description": "Dependencies for the unit tests (BUILD_TESTING=ON)",
+      "dependencies": [
+        "catch2",
+        "fftw3"
+      ]
+    }
+  },
+  "vcpkg-configuration": {
+    "overlay-ports": [
+      "./ports"
+    ]
+  }
+}

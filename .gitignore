@@ -3,3 +3,4 @@ release-info.cmake
 tarballs
 build/
 build-logs/
+vcpkg_installed/

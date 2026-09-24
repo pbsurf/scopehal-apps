@@ -1,0 +1,87 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-msvc-base",
+      "hidden": true,
+      "description": "Native MSVC build with dependencies from vcpkg (manifest mode, see vcpkg.json). Run from a VS Developer Prompt with VCPKG_ROOT set.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl",
+        "VCPKG_MANIFEST_DIR": "${sourceDir}/msvc",
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "VCPKG_HOST_TRIPLET": "x64-windows",
+        "VCPKG_MANIFEST_FEATURES": "iio",
+        "PKG_CONFIG_EXECUTABLE": "${sourceDir}/build/${presetName}/vcpkg_installed/x64-windows/tools/pkgconf/pkgconf.exe",
+        "Vulkan_GLSLC_EXECUTABLE": "${sourceDir}/build/${presetName}/vcpkg_installed/x64-windows/tools/shaderc/glslc.exe",
+        "BUILD_TESTING": "OFF"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "windows-msvc",
+      "displayName": "Windows MSVC (RelWithDebInfo)",
+      "inherits": "windows-msvc-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "windows-msvc-debug",
+      "displayName": "Windows MSVC (Debug)",
+      "inherits": "windows-msvc-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "windows-msvc-tests",
+      "displayName": "Windows MSVC (RelWithDebInfo, unit tests)",
+      "inherits": "windows-msvc-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "VCPKG_MANIFEST_FEATURES": "iio;tests",
+        "BUILD_TESTING": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-msvc",
+      "configurePreset": "windows-msvc"
+    },
+    {
+      "name": "windows-msvc-debug",
+      "configurePreset": "windows-msvc-debug"
+    },
+    {
+      "name": "windows-msvc-tests",
+      "configurePreset": "windows-msvc-tests"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-msvc-tests",
+      "configurePreset": "windows-msvc-tests",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
