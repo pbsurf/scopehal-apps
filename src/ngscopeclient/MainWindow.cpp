@@ -69,6 +69,7 @@
 #include "SCPIConsoleDialog.h"
 #include "ScopeDeskewWizard.h"
 #include "TriggerPropertiesDialog.h"
+#include "../scopeprotocols/HTTPExportFilter.h"
 #include "../scopeprotocols/TouchstoneImportFilter.h"
 #include "../scopehal/ImportFilter.h"
 #include "../scopehal/SCPINullTransport.h"
@@ -673,6 +674,17 @@ void MainWindow::RenderUI()
 	ResetStyle();
 
 	m_needRender = false;
+
+	//Apply HTTP export preferences (cheap no-op if nothing changed)
+	{
+		auto& prefs = m_session.GetPreferences();
+		auto port = prefs.GetInt("Network.HTTP Export.port");
+		if( (port < 1) || (port > 65535) )
+			port = 8080;
+		HTTPExportServer::Get().Configure(
+			prefs.GetEnumRaw("Network.HTTP Export.listen_address") ? "0.0.0.0" : "127.0.0.1",
+			static_cast<uint16_t>(port));
+	}
 
 	//Keep references to all of our waveform textures until next frame
 	//Any groups we're closing will be destroyed at the start of that frame, once rendering has finished
@@ -1590,6 +1602,15 @@ void MainWindow::ShowTriggerProperties()
 
 	m_triggerDialog = make_shared<TriggerPropertiesDialog>(&m_session);
 	AddDialog(m_triggerDialog);
+}
+
+void MainWindow::ShowPreferenceDialog()
+{
+	if(m_preferenceDialog != nullptr)
+		return;
+
+	m_preferenceDialog = make_shared<PreferenceDialog>(m_session.GetPreferences());
+	AddDialog(m_preferenceDialog);
 }
 
 void MainWindow::ShowChannelProperties(OscilloscopeChannel* channel)

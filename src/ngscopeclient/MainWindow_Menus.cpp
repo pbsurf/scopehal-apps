@@ -622,10 +622,7 @@ void MainWindow::SetupMenu()
 		if(prefsVisible)
 			ImGui::BeginDisabled();
 		if(ImGui::MenuItem("Preferences..."))
-		{
-			m_preferenceDialog = make_shared<PreferenceDialog>(m_session.GetPreferences());
-			AddDialog(m_preferenceDialog);
-		}
+			ShowPreferenceDialog();
 		if(prefsVisible)
 			ImGui::EndDisabled();
 

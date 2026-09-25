@@ -199,6 +199,7 @@ public:
 	void HideChannelProperties(InstrumentChannel* channel);
 	void ShowInstrumentProperties(std::shared_ptr<Instrument> instrument);
 	void ShowTriggerProperties();
+	void ShowPreferenceDialog();
 	void ShowManageInstruments();
 	void ShowSyncWizard(std::shared_ptr<TriggerGroup> group, std::shared_ptr<Oscilloscope> secondary);
 

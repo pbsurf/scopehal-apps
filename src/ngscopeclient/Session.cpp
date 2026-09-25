@@ -36,6 +36,7 @@
 #include "ngscopeclient-version.h"
 #include "Session.h"
 #include "../scopeprotocols/ExportFilter.h"
+#include "../scopeprotocols/HTTPExportFilter.h"
 #include "MainWindow.h"
 #include "BERTDialog.h"
 #include "LoadDialog.h"
@@ -225,6 +226,7 @@ void Session::Clear()
 	 */
 	auto filters = Filter::GetAllInstances();
 	set<Filter*> filtersToFree;
+	set<HTTPExportFilter*> httpFiltersToFree;
 	for(auto f : filters)
 	{
 		LogTrace("First pass: Leaked filter %s (%zu refs)\n", f->GetHwname().c_str(), f->GetRefCount());
@@ -233,11 +235,21 @@ void Session::Clear()
 		auto e = dynamic_cast<ExportFilter*>(f);
 		if(e)
 			filtersToFree.emplace(e);
+
+		//HTTP export filters may have dropped their self reference already (failed graph editor deletion)
+		auto http = dynamic_cast<HTTPExportFilter*>(f);
+		if(http)
+			httpFiltersToFree.emplace(http);
 	}
 	for(auto f : filtersToFree)
 	{
 		LogTrace("Freeing filter %s\n", f->GetHwname().c_str());
 		f->Release();
+	}
+	for(auto f : httpFiltersToFree)
+	{
+		LogTrace("Freeing filter %s\n", f->GetHwname().c_str());
+		f->ReleaseSelfReference();
 	}
 
 	//Log any that are still around but don't touch as we have no idea why they're here

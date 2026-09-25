@@ -709,6 +709,24 @@ void PreferenceManager::InitializeDefaults()
 				.Label("Recent instrument count")
 				.Description("Number of recently used instruments to display"));
 
+	auto& net = this->m_treeRoot.AddCategory("Network");
+		auto& http = net.AddCategory("HTTP Export");
+			http.AddPreference(
+				Preference::Enum("listen_address", 0)
+					.Label("Listen address")
+					.Description(
+						"Network interfaces the HTTP Export server accepts connections on.\n"
+						"\n"
+						"The server has no authentication, so only listen on all interfaces on a trusted network."
+						)
+					.EnumValue("Loopback only", 0)
+					.EnumValue("All interfaces", 1)
+				);
+			http.AddPreference(
+				Preference::Int("port", 8080)
+				.Label("Port")
+				.Description("TCP port for the HTTP Export server"));
+
 	auto& pwr = this->m_treeRoot.AddCategory("Power");
 		auto& events = pwr.AddCategory("Events");
 			events.AddPreference(

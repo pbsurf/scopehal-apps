@@ -40,6 +40,7 @@
 #include "IGFDFileBrowser.h"
 #include "NFDFileBrowser.h"
 #include "../scopehal/ActionProvider.h"
+#include "../scopeprotocols/HTTPExportFilter.h"
 #include "../scopeprotocols/TouchstoneImportFilter.h"
 #include "FilterGraphEditor.h"
 #include "../scopehal/ImportFilter.h"
@@ -256,6 +257,25 @@ bool FilterPropertiesDialog::DoRender()
 				else if(DoParameter(it->second, it->first, m_paramTempValues))
 					reconfigured = true;
 			}
+		}
+	}
+
+	//Show where to find the value of an HTTP export filter
+	auto http = dynamic_cast<HTTPExportFilter*>(f);
+	if(http)
+	{
+		if(ImGui::CollapsingHeader("HTTP Export", ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			//Read only text box so the URL can be selected and copied
+			auto url = http->GetEndpointURL();
+			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 20);
+			ImGui::InputText("###endpoint", &url, ImGuiInputTextFlags_ReadOnly);
+			ImGui::SameLine();
+			if(ImGui::Button("Preferences..."))
+				m_parent->ShowPreferenceDialog();
+			HelpMarker(
+				"URL of this value on the HTTP Export server.\n\n"
+				"The listen address and port are set in the Network > HTTP Export section of the preferences.");
 		}
 	}
 

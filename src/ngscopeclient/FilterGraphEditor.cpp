@@ -46,6 +46,7 @@
 #include "MeasurementsDialog.h"
 #include "../scopehal/DensityFunctionWaveform.h"
 #include "../scopeprotocols/DigitalConstantFilter.h"
+#include "../scopeprotocols/HTTPExportFilter.h"
 #include "../scopehal/DigitalIOChannel.h"
 #include "../scopehal/DigitalInputChannel.h"
 #include "../scopehal/DigitalOutputChannel.h"
@@ -2145,6 +2146,12 @@ bool FilterGraphEditor::OnFilterDeleted(Filter* node)
 			}
 		}
 	}
+
+	//HTTP export filters hold a reference to themselves since nothing downstream does, drop it
+	//(only once, even if this deletion attempt fails and the user tries again)
+	auto http = dynamic_cast<HTTPExportFilter*>(node);
+	if(http)
+		http->ReleaseSelfReference();
 
 	//Delete it. If we did our job right it should be gone now
 	auto finalRefCount = node->GetRefCount();
