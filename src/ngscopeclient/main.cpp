@@ -379,6 +379,11 @@ int main(int argc, char* argv[])
 			{
 				if(settleFramesLeft > 0)
 					settleFramesLeft --;
+
+				//Docking takes several frames; don't sleep until it's finished
+				else if(g_mainWindow->IsLayoutPending())
+				{}
+
 				else
 				{
 					//polling_timeout preference is in femtoseconds; SDL_WaitEventTimeout wants milliseconds

@@ -137,6 +137,9 @@ MainWindow::MainWindow(shared_ptr<QueueHandle> queue, bool maximized, bool resto
 	, m_needRender(false)
 	, m_toneMapTime(0)
 {
+	m_defaultLayoutRequest = false;
+	m_layoutSettleFrames = 0;
+
 	LoadRecentInstrumentList();
 	LoadRecentFileList();
 
@@ -275,6 +278,7 @@ void MainWindow::CloseSession()
 	m_tutorialDialog = nullptr;
 	m_manageInstrumentsDialog = nullptr;
 	m_initialWorkspaceDockRequest = nullptr;
+	m_defaultLayoutRequest = false;
 	m_graphEditor = nullptr;
 	m_graphEditorConfigBlob = "";
 	m_graphEditorGroups.clear();
@@ -1491,8 +1495,59 @@ void MainWindow::DockingArea()
 			m_initialWorkspaceDockRequest = nullptr;
 		}
 	}
+	//Handle default docking of a session loaded without a saved layout
+	else if(m_defaultLayoutRequest)
+	{
+		if(topNode != nullptr)
+		{
+			LogTrace("Docking default layout\n");
+
+			//Undock anything that might already be there
+			ImGui::DockBuilderRemoveNodeChildNodes(topNode->ID);
+
+			//Stream browser on the left (if we have one), everything else tabbed on the right
+			ImGuiID rightPanelID = topNode->ID;
+			if(m_streamBrowser)
+			{
+				ImGuiID leftPanelID;
+				if(topNode->IsSplitNode())
+				{
+					leftPanelID = topNode->ChildNodes[0]->ID;
+					rightPanelID = topNode->ChildNodes[1]->ID;
+				}
+				else
+					ImGui::DockBuilderSplitNode(topNode->ID, ImGuiDir_Left, 0.2, &leftPanelID, &rightPanelID);
+
+				ImGui::DockBuilderDockWindow(m_streamBrowser->GetTitleAndID().c_str(), leftPanelID);
+			}
+
+			for(auto& w : m_workspaces)
+				ImGui::DockBuilderDockWindow(w->GetTitleAndID().c_str(), rightPanelID);
+			{
+				lock_guard<recursive_mutex> lock(m_waveformGroupsMutex);
+				for(auto& g : m_waveformGroups)
+					ImGui::DockBuilderDockWindow(g->GetID().c_str(), rightPanelID);
+			}
+			if(m_graphEditor)
+				ImGui::DockBuilderDockWindow(m_graphEditor->GetTitleAndID().c_str(), rightPanelID);
+			if(m_filterPalette)
+				ImGui::DockBuilderDockWindow(m_filterPalette->GetTitleAndID().c_str(), rightPanelID);
+
+			//Finish up
+			ImGui::DockBuilderFinish(dockspace_id);
+
+			m_defaultLayoutRequest = false;
+		}
+	}
+
 	else
 		dockChanged = false;
+
+	//ImGui needs a few more frames after a dock change before windows reach their final size and position
+	if(dockChanged)
+		m_layoutSettleFrames = 3;
+	else if(m_layoutSettleFrames > 0)
+		m_layoutSettleFrames --;
 
 	topNode = ImGui::DockContextFindNodeByID(ImGui::GetCurrentContext(), dockspace_id);
 
@@ -1602,6 +1657,23 @@ void MainWindow::ShowTriggerProperties()
 
 	m_triggerDialog = make_shared<TriggerPropertiesDialog>(&m_session);
 	AddDialog(m_triggerDialog);
+}
+
+/**
+	@brief Checks if docking work is queued or still settling
+
+	Docking requests are handled one per frame, so in event driven mode the main loop must keep rendering (rather
+	than waiting for input) until this returns false, or the layout is left half done until the mouse moves.
+ */
+bool MainWindow::IsLayoutPending()
+{
+	return
+		!m_splitRequests.empty() ||
+		!m_newWaveformGroups.empty() ||
+		!m_pendingChannelDisplayRequests.empty() ||
+		(m_initialWorkspaceDockRequest && m_streamBrowser) ||
+		m_defaultLayoutRequest ||
+		(m_layoutSettleFrames > 0);
 }
 
 void MainWindow::ShowPreferenceDialog()
@@ -2650,7 +2722,12 @@ void MainWindow::DoOpenFile(const string& sessionPath, bool online)
 	{
 		LogTrace("yaml badfile\n");
 
-		ShowErrorPopup("Cannot open file", string("Unable to open the file \"") + sessionPath + "\"!");
+		//The missing file may be one in the data directory rather than the session file itself, so say which
+		ShowErrorPopup(
+			"Cannot open file",
+			string("Unable to open a file while loading \"") + sessionPath + "\"!\n\n" +
+			"Debug information:\n" +
+			ex.what());
 		return;
 	}
 	catch(const YAML::Exception& ex)
@@ -2748,7 +2825,17 @@ bool MainWindow::LoadSessionFromYaml(const YAML::Node& node, const string& dataD
 	//Load ImGui configuration
 	LogTrace("Loading ImGui configuration\n");
 	string ipath = dataDir + "/imgui.ini";
-	ImGui::LoadIniSettingsFromDisk(ipath.c_str());
+	if(filesystem::exists(ipath))
+		ImGui::LoadIniSettingsFromDisk(ipath.c_str());
+
+	//No saved layout (session file copied without its data directory, or a legacy file)?
+	//Dock everything into a default layout next frame, rather than leaving tiny floating windows everywhere
+	else
+	{
+		LogWarning("No window layout found (%s), using default layout\n", ipath.c_str());
+		m_newWaveformGroups.clear();
+		m_defaultLayoutRequest = true;
+	}
 
 	LogTrace("Load completed successfully\n");
 	return true;

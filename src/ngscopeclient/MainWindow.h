@@ -244,6 +244,8 @@ public:
 	void SetNeedRender()
 	{ m_needRender = true; }
 
+	bool IsLayoutPending();
+
 	void ClearPersistence()
 	{
 		m_clearPersistence = true;
@@ -480,6 +482,12 @@ protected:
 
 	///@brief Pending requests to dock initial stuff
 	std::shared_ptr<Workspace> m_initialWorkspaceDockRequest;
+
+	///@brief Set when a session was loaded without saved ImGui layout, so we need to dock everything ourselves
+	bool m_defaultLayoutRequest;
+
+	///@brief Number of frames left for ImGui to settle after the dock layout was changed
+	int m_layoutSettleFrames;
 
 	///@brief Pending requests to close waveform groups
 	std::vector<size_t> m_groupsToClose;

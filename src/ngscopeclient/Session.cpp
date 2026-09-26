@@ -62,6 +62,7 @@
 #include "../scopehal/SCPISpectrometer.h"
 #include "../scopehal/SCPIVNA.h"
 
+#include <filesystem>
 #include <fstream>
 #include <cinttypes>
 
@@ -484,6 +485,11 @@ bool Session::LoadWaveformData(int version, const string& dataDir)
 
 		char tmp[512] = {0};
 		snprintf(tmp, sizeof(tmp), "%s/scope_%d_metadata.yml", dataDir.c_str(), id);
+
+		//No metadata file (e.g. session file copied without its data directory)? No waveforms at all, skip loading.
+		//Check first, since YAML::LoadAllFromFile() throws if the file doesn't exist.
+		if(!filesystem::exists(tmp))
+			return true;
 		auto docs = YAML::LoadAllFromFile(tmp);
 
 		//Nothing there? No waveforms at all, skip loading
