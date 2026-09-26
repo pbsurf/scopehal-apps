@@ -136,6 +136,10 @@ public:
 
 	void ArmTrigger(TriggerGroup::TriggerType type, bool all=false);
 	void StopTrigger(bool all=false);
+
+	///@brief True if the trigger is armed in a repeating mode (normal or auto), so new waveforms keep arriving
+	bool IsTriggerRunning()
+	{ return m_triggerArmed && !m_triggerOneShot; }
 	bool HasOnlineScopes();
 	void DownloadWaveforms();
 	bool CheckForWaveforms(vk::raii::CommandBuffer& cmdbuf);

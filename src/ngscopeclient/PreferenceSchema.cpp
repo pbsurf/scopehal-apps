@@ -726,6 +726,16 @@ void PreferenceManager::InitializeDefaults()
 				Preference::Int("port", 8080, 0)	//step 0: no +/- buttons, a port isn't adjusted in steps
 				.Label("Port")
 				.Description("TCP port for the HTTP Export server"));
+			http.AddPreference(
+				Preference::Bool("allow_trigger", true)
+				.Label("Allow remote triggering")
+				.Description(
+					"Allow HTTP clients to request an acquisition with the trigger=force or trigger=single\n"
+					"query parameter. If the trigger is stopped, a one-shot acquisition is started; if it's\n"
+					"running, clients just wait for the next waveform.\n"
+					"\n"
+					"Anyone who can reach the server can then start acquisitions."
+					));
 
 	auto& pwr = this->m_treeRoot.AddCategory("Power");
 		auto& events = pwr.AddCategory("Events");

@@ -687,7 +687,17 @@ void MainWindow::RenderUI()
 			port = 8080;
 		HTTPExportServer::Get().Configure(
 			prefs.GetEnumRaw("Network.HTTP Export.listen_address") ? "0.0.0.0" : "127.0.0.1",
-			static_cast<uint16_t>(port));
+			static_cast<uint16_t>(port),
+			prefs.GetBool("Network.HTTP Export.allow_trigger"));
+
+		//Acquisition requested by an HTTP client. If the trigger is running, the next waveform will do.
+		auto trigger = HTTPExportServer::Get().TakeTriggerRequest();
+		if( (trigger != HTTPExportServer::TRIGGER_NONE) && !m_session.IsTriggerRunning())
+		{
+			bool force = (trigger == HTTPExportServer::TRIGGER_FORCE);
+			LogVerbose("HTTP export: client requested a %s acquisition\n", force ? "forced" : "single");
+			m_session.ArmTrigger(force ? TriggerGroup::TRIGGER_TYPE_FORCED : TriggerGroup::TRIGGER_TYPE_SINGLE);
+		}
 	}
 
 	//Keep references to all of our waveform textures until next frame
