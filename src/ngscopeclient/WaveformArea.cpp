@@ -385,7 +385,7 @@ WaveformArea::WaveformArea(StreamDescriptor stream, shared_ptr<WaveformGroup> gr
 	, m_bertChannelDuringDrag(nullptr)
 	, m_lastRightClickOffset(0)
 	, m_channelButtonHeight(0)
-	, m_dragPeakLabel(nullptr)
+	, m_dragPeakLabelId(0)
 	, m_mouseOverButton(false)
 	, m_yAxisCursorMode(Y_CURSOR_NONE)
 	, m_cursorPlacedThisFrame(false)
@@ -1561,12 +1561,38 @@ ImVec2 WaveformArea::ClosestPointOnLineSegment(ImVec2 lineA, ImVec2 lineB, ImVec
 }
 
 /**
+	@brief Look up the peak label being dragged
+
+	@return The label, or nullptr if not dragging a label or it (or its channel) went away
+ */
+PeakLabel* WaveformArea::GetDragPeakLabel()
+{
+	if(m_dragState != DRAG_STATE_PEAK_MARKER)
+		return nullptr;
+
+	auto channel = m_dragPeakChannel.lock();
+	if(!channel)
+		return nullptr;
+
+	for(auto& label : channel->m_peakLabels)
+	{
+		if(label.m_id == m_dragPeakLabelId)
+			return &label;
+	}
+	return nullptr;
+}
+
+/**
 	@brief Draw peaks from a FFT or similar waveform
  */
 void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedChannel> channel)
 {
 	auto stream = channel->GetStream();
-	auto& peaks = dynamic_cast<PeakDetectionFilter*>(stream.m_channel)->GetPeaks();
+	auto pf = dynamic_cast<PeakDetectionFilter*>(stream.m_channel);
+	auto& peaks = pf->GetPeaks();
+
+	//The peak list may hold more peaks than we display, for downstream filters
+	size_t npeaks = pf->GetDisplayedPeakCount();
 
 	//TODO: add a preference for peak circle color and size?
 	ImU32 circleColor = 0xffffffff;
@@ -1587,22 +1613,25 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 			peaksToDelete.push_back(i);
 
 			//Stop dragging if we're deleting it
-			if( (&channel->m_peakLabels[i] == m_dragPeakLabel) && (m_dragState = DRAG_STATE_PEAK_MARKER) )
+			if(IsDraggingPeakLabel(channel->m_peakLabels[i]))
 			{
 				m_dragState = DRAG_STATE_NONE;
-				m_dragPeakLabel = nullptr;
+				m_dragPeakChannel.reset();
+				m_dragPeakLabelId = 0;
 			}
 		}
 	}
 	if(!peaksToDelete.empty())
 	{
 		for(ssize_t n=peaksToDelete.size() - 1; n >= 0; n--)
-			channel->m_peakLabels.erase(channel->m_peakLabels.begin() + n);
+			channel->m_peakLabels.erase(channel->m_peakLabels.begin() + peaksToDelete[n]);
 	}
 
 	//Initial peak processing
-	for(auto p : peaks)
+	for(size_t ipeak=0; ipeak<npeaks; ipeak++)
 	{
+		auto p = peaks[ipeak];
+
 		//Draw the circle for the peak
 		list->AddCircle(
 			ImVec2(m_group->XAxisUnitsToXPosition(p.m_x), YAxisUnitsToYPosition(p.m_y)),
@@ -1630,7 +1659,11 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 		//Not found, create a new peak
 		if(!hit)
 		{
+			//IDs are unique across all areas, since a channel (and its labels) can move between areas
+			static uint64_t nextPeakLabelId = 1;
+
 			PeakLabel npeak;
+			npeak.m_id = nextPeakLabelId++;
 
 			//Initial X position is just left of the peak
 			npeak.m_labelXpos = p.m_x - m_group->PixelsToXAxisUnits(5 * ImGui::GetFontSize());
@@ -1761,14 +1794,15 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 		//Start dragging
 		if(mouseHit && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 		{
-			m_dragPeakLabel = &label;
+			m_dragPeakChannel = channel;
+			m_dragPeakLabelId = label.m_id;
 			m_dragState = DRAG_STATE_PEAK_MARKER;
 			m_dragPeakAnchorOffset = ImVec2(labelXpos - mousePos.x, labelYpos - mousePos.y);
 		}
 
 		//Make background lighter if dragging
 		float fmul = 0.3;
-		if( (m_dragState == DRAG_STATE_PEAK_MARKER) && (m_dragPeakLabel == &label) )
+		if(IsDraggingPeakLabel(label))
 			fmul = 0.5;
 
 		//Draw rectangle filling
@@ -1800,7 +1834,7 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 
 		//Skip physics on anything being dragged
 		//TODO: omit springs if manually positioning a label?
-		bool draggingThis = (m_dragState == DRAG_STATE_PEAK_MARKER) && (&label == m_dragPeakLabel);
+		bool draggingThis = IsDraggingPeakLabel(label);
 		float step = 3;
 		if(!draggingThis)
 		{
@@ -1857,7 +1891,7 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 				}
 
 				//Don't move the other label if we're dragging it
-				if( (m_dragState == DRAG_STATE_PEAK_MARKER) && (&jlabel == m_dragPeakLabel) )
+				if(IsDraggingPeakLabel(jlabel))
 					continue;
 
 				jlabel.m_labelXpos -= m_group->PixelsToXAxisUnits(jux * step);
@@ -4805,7 +4839,8 @@ void WaveformArea::OnMouseUp()
 			break;
 
 		case DRAG_STATE_PEAK_MARKER:
-			m_dragPeakLabel = nullptr;
+			m_dragPeakChannel.reset();
+			m_dragPeakLabelId = 0;
 			break;
 
 		//stay in sorta-dragging state until end of this frame
@@ -4982,15 +5017,15 @@ void WaveformArea::OnDragUpdate()
 			break;
 
 		case DRAG_STATE_PEAK_MARKER:
-			if(m_dragPeakLabel != nullptr)
+			if(auto label = GetDragPeakLabel())
 			{
 				auto mouse = ImGui::GetMousePos();
 
 				float anchorX = mouse.x + m_dragPeakAnchorOffset.x;
 				float anchorY = mouse.y + m_dragPeakAnchorOffset.y;
 
-				m_dragPeakLabel->m_labelXpos = m_group->XPositionToXAxisUnits(anchorX);
-				m_dragPeakLabel->m_labelYpos = YPositionToYAxisUnits(anchorY);
+				label->m_labelXpos = m_group->XPositionToXAxisUnits(anchorX);
+				label->m_labelYpos = YPositionToYAxisUnits(anchorY);
 			}
 			break;
 

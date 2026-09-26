@@ -7,6 +7,7 @@ add_executable(Filters
 	Filter_EyePattern.cpp
 	Filter_FFT_Peaks.cpp
 	Filter_FIR.cpp
+	Filter_PeakSelect.cpp
 	Filter_SpectrumStitch.cpp
 	Filter_Subtract.cpp
 	Filter_Upsample.cpp

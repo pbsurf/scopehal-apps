@@ -170,6 +170,9 @@ public:
  */
 struct PeakLabel
 {
+	///@brief Unique ID, so a label can be tracked while the vector holding it changes
+	uint64_t m_id;
+
 	///@brief X axis position of the label's centroid
 	int64_t m_labelXpos;
 
@@ -743,8 +746,16 @@ protected:
 	///@brief Height of a channel button
 	float m_channelButtonHeight;
 
-	///@brief Peak label being dragged, if any
-	PeakLabel* m_dragPeakLabel;
+	PeakLabel* GetDragPeakLabel();
+
+	bool IsDraggingPeakLabel(const PeakLabel& label)
+	{ return (m_dragState == DRAG_STATE_PEAK_MARKER) && (label.m_id == m_dragPeakLabelId); }
+
+	///@brief Channel owning the peak label being dragged, if any
+	std::weak_ptr<DisplayedChannel> m_dragPeakChannel;
+
+	///@brief ID of the peak label being dragged (0 if none)
+	uint64_t m_dragPeakLabelId;
 
 	///@brief Offset, in pixels, from mouse to anchor point of peak being dragged
 	ImVec2 m_dragPeakAnchorOffset;
