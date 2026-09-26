@@ -723,7 +723,7 @@ void PreferenceManager::InitializeDefaults()
 					.EnumValue("All interfaces", 1)
 				);
 			http.AddPreference(
-				Preference::Int("port", 8080)
+				Preference::Int("port", 8080, 0)	//step 0: no +/- buttons, a port isn't adjusted in steps
 				.Label("Port")
 				.Description("TCP port for the HTTP Export server"));
 

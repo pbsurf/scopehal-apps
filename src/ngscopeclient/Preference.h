@@ -176,6 +176,7 @@ private:
 	PreferenceValue m_value;
 	PreferenceValue m_defaultValue;
 	bool m_isVisible{true};
+	std::int64_t m_step{1};
 	Unit m_unit{Unit::UNIT_COUNTS};
 	bool m_hasValue{false};
 	EnumMapping m_mapping;
@@ -222,6 +223,7 @@ public:
 	const std::string& GetString() const;
 	std::string ToString() const;
 	bool GetIsVisible() const;
+	std::int64_t GetStep() const;
 	const impl::ThemedColor& GetThemedColor() const;
 	void SetBool(bool value);
 	void SetReal(double value);
@@ -251,7 +253,7 @@ public:
 	}
 
 public:
-	static impl::PreferenceBuilder Int(std::string identifier, int64_t defaultValue);
+	static impl::PreferenceBuilder Int(std::string identifier, int64_t defaultValue, int64_t step = 1);
 	static impl::PreferenceBuilder Real(std::string identifier, double defaultValue);
 	static impl::PreferenceBuilder Bool(std::string identifier, bool defaultValue);
 	static impl::PreferenceBuilder String(std::string identifier, std::string defaultValue);

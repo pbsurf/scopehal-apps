@@ -153,6 +153,12 @@ bool Preference::GetIsVisible() const
 	return m_isVisible;
 }
 
+///@brief Gets the increment of the +/- buttons of an Int preference (0 if it has none)
+int64_t Preference::GetStep() const
+{
+	return m_step;
+}
+
 bool Preference::GetBool() const
 {
 	if(m_type != PreferenceType::Boolean)
@@ -256,6 +262,7 @@ void Preference::MoveFrom(Preference& other)
 	m_description = std::move(other.m_description);
 	m_label = std::move(other.m_label);
 	m_isVisible = std::move(other.m_isVisible);
+	m_step = std::move(other.m_step);
 	m_unit = std::move(other.m_unit);
 	m_hasValue = std::move(other.m_hasValue);
 	m_mapping = std::move(other.m_mapping);
@@ -375,11 +382,19 @@ void Preference::SetMapping(EnumMapping mapping)
 	this->m_mapping = std::move(mapping);
 }
 
-impl::PreferenceBuilder Preference::Int(std::string identifier, int64_t defaultValue)
+/**
+	@brief Creates an integer preference
+
+	@param identifier	Identifier
+	@param defaultValue	Default value
+	@param step			Increment of the +/- buttons in the preferences dialog, or 0 for no buttons
+ */
+impl::PreferenceBuilder Preference::Int(std::string identifier, int64_t defaultValue, int64_t step)
 {
 	Preference pref(PreferenceType::Int, std::move(identifier));
 	pref.Construct<int64_t>(defaultValue);
 	new (&pref.m_defaultValue) int64_t(std::move(defaultValue));
+	pref.m_step = step;
 
 	return impl::PreferenceBuilder{ std::move(pref) };
 }

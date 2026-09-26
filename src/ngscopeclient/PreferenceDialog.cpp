@@ -405,7 +405,7 @@ void PreferenceDialog::ProcessPreference(Preference& pref)
 			{
 				int i = pref.GetInt();
 				ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10);
-				if(ImGui::InputInt(label.c_str(), &i))
+				if(ImGui::InputInt(label.c_str(), &i, static_cast<int>(pref.GetStep())))
 					pref.SetInt(i);
 			}
 			break;
