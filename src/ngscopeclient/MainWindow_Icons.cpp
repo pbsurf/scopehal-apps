@@ -127,6 +127,7 @@
 #include "../scopeprotocols/GroupDelayFilter.h"
 #include "../scopeprotocols/HistogramFilter.h"
 #include "../scopeprotocols/HorizontalBathtub.h"
+#include "../scopeprotocols/HTTPExportFilter.h"
 #include "../scopeprotocols/HyperRAMDecoder.h"
 #include "../scopeprotocols/I2CDecoder.h"
 #include "../scopeprotocols/I2CEepromDecoder.h"
@@ -170,6 +171,7 @@
 #include "../scopeprotocols/PhaseMeasurement.h"
 #include "../scopeprotocols/PhaseNonlinearityFilter.h"
 #include "../scopeprotocols/PeakHoldFilter.h"
+#include "../scopeprotocols/PeakSelectFilter.h"
 #include "../scopeprotocols/PeaksFilter.h"
 #include "../scopeprotocols/PeriodMeasurement.h"
 #include "../scopeprotocols/PkPkMeasurement.h"
@@ -348,6 +350,7 @@ void MainWindow::LoadFilterIcons()
 	m_texmgr.LoadTexture("filter-group-delay", FindDataFile("icons/filters/filter-group-delay.png"));
 	m_texmgr.LoadTexture("filter-histogram", FindDataFile("icons/filters/filter-histogram.png"));
 	m_texmgr.LoadTexture("filter-horz-bathtub", FindDataFile("icons/filters/filter-horz-bathtub.png"));
+	m_texmgr.LoadTexture("filter-http-export", FindDataFile("icons/filters/filter-http-export.png"));
 	m_texmgr.LoadTexture("filter-hyperram", FindDataFile("icons/filters/filter-hyperram.png"));
 	m_texmgr.LoadTexture("filter-i2c", FindDataFile("icons/filters/filter-i2c.png"));
 	m_texmgr.LoadTexture("filter-i2c-eeprom", FindDataFile("icons/filters/filter-i2c-eeprom.png"));
@@ -392,6 +395,7 @@ void MainWindow::LoadFilterIcons()
 	m_texmgr.LoadTexture("filter-pcie-transport", FindDataFile("icons/filters/filter-pcie-transport.png"));
 	m_texmgr.LoadTexture("filter-peaks", FindDataFile("icons/filters/filter-peaks.png"));
 	m_texmgr.LoadTexture("filter-peak-hold", FindDataFile("icons/filters/filter-peak-hold.png"));
+	m_texmgr.LoadTexture("filter-peak-select", FindDataFile("icons/filters/filter-peak-select.png"));
 	m_texmgr.LoadTexture("filter-peaktopeak", FindDataFile("icons/filters/filter-peaktopeak.png"));
 	m_texmgr.LoadTexture("filter-period", FindDataFile("icons/filters/filter-period.png"));
 	m_texmgr.LoadTexture("filter-phase", FindDataFile("icons/filters/filter-phase.png"));
@@ -536,6 +540,7 @@ void MainWindow::LoadFilterIcons()
 	m_filterIconMap[type_index(typeid(GroupDelayFilter))] 						= "filter-group-delay";
 	m_filterIconMap[type_index(typeid(HistogramFilter))] 						= "filter-histogram";
 	m_filterIconMap[type_index(typeid(HorizontalBathtub))] 						= "filter-horz-bathtub";
+	m_filterIconMap[type_index(typeid(HTTPExportFilter))] 						= "filter-http-export";
 	m_filterIconMap[type_index(typeid(HyperRAMDecoder))] 						= "filter-hyperram";
 	m_filterIconMap[type_index(typeid(IBM8b10bDecoder))] 						= "filter-8b10bdecoder";
 	m_filterIconMap[type_index(typeid(I2CDecoder))] 							= "filter-i2c";
@@ -576,6 +581,7 @@ void MainWindow::LoadFilterIcons()
 	m_filterIconMap[type_index(typeid(PCIeTransportDecoder))] 					= "filter-pcie-transport";
 	m_filterIconMap[type_index(typeid(PeaksFilter))] 							= "filter-peaks";
 	m_filterIconMap[type_index(typeid(PeakHoldFilter))] 						= "filter-peak-hold";
+	m_filterIconMap[type_index(typeid(PeakSelectFilter))] 						= "filter-peak-select";
 	m_filterIconMap[type_index(typeid(PhaseMeasurement))] 						= "filter-phase";
 	m_filterIconMap[type_index(typeid(PhaseNonlinearityFilter))] 				= "filter-phase-nonlinearity";
 	m_filterIconMap[type_index(typeid(PkPkMeasurement))] 						= "filter-peaktopeak";
