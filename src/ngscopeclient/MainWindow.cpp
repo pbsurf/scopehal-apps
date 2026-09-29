@@ -177,6 +177,8 @@ MainWindow::MainWindow(shared_ptr<QueueHandle> queue, bool maximized, bool resto
 	LoadWaveformShapeIcons();
 	LoadAppIcon();
 
+	m_statusMetric = STATUS_METRIC_WAVEFORM_RATE;
+
 	//Don't move windows when dragging in the body, only the title bar
 	ImGui::GetIO().ConfigWindowsMoveFromTitleBarOnly = true;
 
@@ -1629,6 +1631,55 @@ void MainWindow::StatusBar(float height)
 
 	//Delete status bar contents so we can draw new stuff next frame
 	m_statusHelp.clear();
+
+	//Right-aligned metric, click to cycle to the next one
+	string metric = GetStatusMetricText();
+	float metricWidth = ImGui::CalcTextSize(metric.c_str()).x + 2*ImGui::GetStyle().FramePadding.x;
+	float metricSpace = ImGui::GetContentRegionAvail().x - metricWidth;
+	if(metricSpace > 0)
+		ImGui::SetCursorPosX(ImGui::GetCursorPosX() + metricSpace);
+	//Fixed ID, since the label changes every time the value does
+	metric += "###StatusMetric";
+	if(ImGui::Selectable(metric.c_str(), false, 0, ImVec2(metricWidth, 0)))
+		m_statusMetric = static_cast<StatusMetric>((m_statusMetric + 1) % STATUS_METRIC_COUNT);
+}
+
+/**
+	@brief Gets the text for the metric currently shown in the status bar
+ */
+string MainWindow::GetStatusMetricText()
+{
+	Unit counts(Unit::UNIT_COUNTS);
+	Unit fs(Unit::UNIT_FS);
+
+	//Keep it compact: 3 significant digits, but don't show "0.000" for zero
+	auto sig3 = [](Unit& unit, double value)
+	{
+		if(value == 0)
+			return unit.PrettyPrint(0);
+		return unit.PrettyPrint(value, 3);
+	};
+
+	switch(m_statusMetric)
+	{
+		case STATUS_METRIC_FRAME_RATE:
+			return sig3(counts, ImGui::GetIO().Framerate) + " FPS";
+
+		case STATUS_METRIC_FILTER_GRAPH_TIME:
+			return "Filter graph: " + sig3(fs, m_session.GetFilterGraphExecTime());
+
+		case STATUS_METRIC_PENDING_WAVEFORMS:
+			{
+				size_t pending = 0;
+				for(auto s : m_session.GetScopes())
+					pending += s->GetPendingWaveformCount();
+				return "Pending waveforms: " + counts.PrettyPrint(pending);
+			}
+
+		case STATUS_METRIC_WAVEFORM_RATE:
+		default:
+			return sig3(counts, m_session.GetWaveformDownloadRate()) + " Wfms/s";
+	}
 }
 
 /**

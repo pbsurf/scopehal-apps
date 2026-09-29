@@ -492,10 +492,6 @@ bool FilterGraphEditor::DoRender()
 
 	ImVec4 linkColor = ImColor(prefs.GetColor("Appearance.Filter Graph.edge_color"));
 
-	// NodeEditor seems to handle DPI scaling on its own
-	// so turn off global scaling to avoid double scaling
-	SetCanvasManagedDPI();
-
 	//Handle dropping a stream or channel from the browser
 	ax::NodeEditor::NodeId newNode;
 	bool nodeAdded = false;
@@ -687,7 +683,6 @@ bool FilterGraphEditor::DoRender()
 	HandleBackgroundContextMenu(windowHovered);
 
 	//Done with canvas stuff
-	SetImGuiManagedDPI();
 	ax::NodeEditor::End();
 
 	//Refresh all of our groups to have up-to-date child contents
@@ -1020,9 +1015,7 @@ void FilterGraphEditor::DoNodeForGroupOutputs(shared_ptr<FilterGraphGroup> group
 	{
 		//Output port
 		ax::NodeEditor::Suspend();
-			SetImGuiManagedDPI();
 			OutputPortTooltip(hoveredStream);
-			SetCanvasManagedDPI();
 		ax::NodeEditor::Resume();
 	}
 
@@ -1707,7 +1700,6 @@ void FilterGraphEditor::HandleLinkCreationRequests(Filter*& fReconfigure)
 	ax::NodeEditor::EndCreate();
 
 	ax::NodeEditor::Suspend();
-	SetImGuiManagedDPI();
 
 		//Create-filter menu
 		if(ImGui::BeginPopup("Create Filter"))
@@ -1723,28 +1715,7 @@ void FilterGraphEditor::HandleLinkCreationRequests(Filter*& fReconfigure)
 			ImGui::EndPopup();
 		}
 
-	SetCanvasManagedDPI();
 	ax::NodeEditor::Resume();
-}
-
-/**
-	@brief Use 1.0 as the DPI since the canvas scales independently
- */
-void FilterGraphEditor::SetCanvasManagedDPI()
-{
-	ImGui::GetStyle().FontScaleDpi = 1.0f;
-	ImGui::UpdateCurrentFontSize(0.0f);
-	m_parent->ResetStyle();
-}
-
-/**
-	@brief Use the ImGui viewport scale as the DPI scale
- */
-void FilterGraphEditor::SetImGuiManagedDPI()
-{
-	ImGui::GetStyle().FontScaleDpi = ImGui::GetWindowViewport()->DpiScale;
-	ImGui::UpdateCurrentFontSize(0.0f);
-	m_parent->ResetStyle();
 }
 
 /**

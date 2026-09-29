@@ -38,6 +38,7 @@
 #include "../../scopehal/TwoLevelTrigger.h"
 #include "../../scopeprotocols/ConstellationFilter.h"
 #include "../../scopeprotocols/EyePattern.h"
+#include "../../scopeprotocols/FFTFilter.h"
 #include "../../scopeprotocols/SpectrogramFilter.h"
 #include "../../scopeprotocols/Waterfall.h"
 #include "../../scopehal/DensityFunctionWaveform.h"
@@ -1211,31 +1212,26 @@ void WaveformArea::PlotContextMenu()
 		//Otherwise, normal GUI context menu
 		else
 		{
-			if(ImGui::BeginMenu("Cursors"))
+			if(ImGui::BeginMenu("X Cursor"))
 			{
-				if(ImGui::BeginMenu("X axis"))
-				{
-					if(ImGui::MenuItem("None", nullptr, (m_group->m_xAxisCursorMode == WaveformGroup::X_CURSOR_NONE)))
-						m_group->m_xAxisCursorMode = WaveformGroup::X_CURSOR_NONE;
-					if(ImGui::MenuItem("Single", nullptr, (m_group->m_xAxisCursorMode == WaveformGroup::X_CURSOR_SINGLE)))
-						m_group->m_xAxisCursorMode = WaveformGroup::X_CURSOR_SINGLE;
-					if(ImGui::MenuItem("Dual", nullptr, (m_group->m_xAxisCursorMode == WaveformGroup::X_CURSOR_DUAL)))
-						m_group->m_xAxisCursorMode = WaveformGroup::X_CURSOR_DUAL;
+				if(ImGui::MenuItem("None", nullptr, (m_group->m_xAxisCursorMode == WaveformGroup::X_CURSOR_NONE)))
+					m_group->m_xAxisCursorMode = WaveformGroup::X_CURSOR_NONE;
+				if(ImGui::MenuItem("Single", nullptr, (m_group->m_xAxisCursorMode == WaveformGroup::X_CURSOR_SINGLE)))
+					m_group->m_xAxisCursorMode = WaveformGroup::X_CURSOR_SINGLE;
+				if(ImGui::MenuItem("Dual", nullptr, (m_group->m_xAxisCursorMode == WaveformGroup::X_CURSOR_DUAL)))
+					m_group->m_xAxisCursorMode = WaveformGroup::X_CURSOR_DUAL;
 
-					ImGui::EndMenu();
-				}
+				ImGui::EndMenu();
+			}
 
-				if(ImGui::BeginMenu("Y axis"))
-				{
-					if(ImGui::MenuItem("None", nullptr, (m_yAxisCursorMode == Y_CURSOR_NONE)))
-						m_yAxisCursorMode = Y_CURSOR_NONE;
-					if(ImGui::MenuItem("Single", nullptr, (m_yAxisCursorMode == Y_CURSOR_SINGLE)))
-						m_yAxisCursorMode = Y_CURSOR_SINGLE;
-					if(ImGui::MenuItem("Dual", nullptr, (m_yAxisCursorMode == Y_CURSOR_DUAL)))
-						m_yAxisCursorMode = Y_CURSOR_DUAL;
-
-					ImGui::EndMenu();
-				}
+			if(ImGui::BeginMenu("Y Cursor"))
+			{
+				if(ImGui::MenuItem("None", nullptr, (m_yAxisCursorMode == Y_CURSOR_NONE)))
+					m_yAxisCursorMode = Y_CURSOR_NONE;
+				if(ImGui::MenuItem("Single", nullptr, (m_yAxisCursorMode == Y_CURSOR_SINGLE)))
+					m_yAxisCursorMode = Y_CURSOR_SINGLE;
+				if(ImGui::MenuItem("Dual", nullptr, (m_yAxisCursorMode == Y_CURSOR_DUAL)))
+					m_yAxisCursorMode = Y_CURSOR_DUAL;
 
 				ImGui::EndMenu();
 			}
@@ -5239,7 +5235,7 @@ void WaveformArea::AutofitVertical()
 	//Find the min and max of all currently displayed analog channels
 	//TODO: do we want to not allow autoscale on instrument inputs?
 	//TODO: GPU accelerate
-	float vmax = FLT_MIN;
+	float vmax = -FLT_MAX;
 	float vmin = FLT_MAX;
 	bool found = false;
 	for(auto& c : m_inputs)
@@ -5252,6 +5248,24 @@ void WaveformArea::AutofitVertical()
 		auto udata = dynamic_cast<UniformAnalogWaveform*>(data);
 		if(!sdata && !udata)
 			continue;
+
+		//If the source filter has a display detector (e.g. FFT peak), fit to what the detector draws
+		//rather than to every sample, since most samples are hidden by the detector
+		auto dc = dynamic_pointer_cast<DisplayedChannel>(c);
+		auto f = dynamic_cast<Filter*>(c->m_sourceStream.m_channel);
+		if(f && f->HasParameter("Detector") && dc && !dc->ShouldFillUnder())
+		{
+			auto detectorMode = f->GetParameter("Detector").GetIntVal();
+			float dmin;
+			float dmax;
+			if( (detectorMode != FFTFilter::DETECTOR_NORMAL) && GetDetectorRange(sdata, udata, detectorMode, dmin, dmax) )
+			{
+				found = true;
+				vmax = max(vmax, dmax);
+				vmin = min(vmin, dmin);
+				continue;
+			}
+		}
 
 		found = true;
 		vmax = max(vmax, Filter::GetMaxVoltage(sdata, udata));
@@ -5270,5 +5284,72 @@ void WaveformArea::AutofitVertical()
 	}
 
 	m_parent->SetNeedRender();
+}
+
+/**
+	@brief Finds the range of values a display detector draws in the visible part of the plot
+
+	Each pixel column is reduced the same way the detector does it (max for peak, mean for average)
+	and the range is taken over the columns, so autoscale matches what's on screen.
+
+	@param sdata			Sparse waveform (or null)
+	@param udata			Uniform waveform (or null)
+	@param detectorMode		FFTFilter::DetectorType
+	@param vmin				Minimum displayed value
+	@param vmax				Maximum displayed value
+
+	@return True if any samples were visible
+ */
+bool WaveformArea::GetDetectorRange(
+	SparseAnalogWaveform* sdata,
+	UniformAnalogWaveform* udata,
+	int64_t detectorMode,
+	float& vmin,
+	float& vmax)
+{
+	size_t w = m_width;
+	if(w == 0)
+		return false;
+
+	int64_t xoff = m_group->GetXAxisOffset();
+	double pixelsPerX = m_group->GetPixelsPerXUnit();
+	float* samples = sdata ? sdata->m_samples.GetCpuPointer() : udata->m_samples.GetCpuPointer();
+	size_t len = sdata ? sdata->size() : udata->size();
+
+	vector<float> colMax(w, -FLT_MAX);
+	vector<double> colSum(w, 0);
+	vector<size_t> colCount(w, 0);
+	for(size_t i=0; i<len; i++)
+	{
+		double px = (GetOffsetScaled(sdata, udata, i) - xoff) * pixelsPerX;
+		if( (px < 0) || (px >= w) )
+			continue;
+
+		size_t col = px;
+		colMax[col] = max(colMax[col], samples[i]);
+		colSum[col] += samples[i];
+		colCount[col] ++;
+	}
+
+	vmin = FLT_MAX;
+	vmax = -FLT_MAX;
+	bool found = false;
+	for(size_t col=0; col<w; col++)
+	{
+		if(colCount[col] == 0)
+			continue;
+
+		float v;
+		if(detectorMode == FFTFilter::DETECTOR_PEAK)
+			v = colMax[col];
+		else
+			v = colSum[col] / colCount[col];
+
+		vmin = min(vmin, v);
+		vmax = max(vmax, v);
+		found = true;
+	}
+
+	return found;
 }
 

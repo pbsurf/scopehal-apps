@@ -622,6 +622,13 @@ protected:
 	void FilterMenu(std::shared_ptr<DisplayedChannel> chan);
 	void FilterSubmenu(std::shared_ptr<DisplayedChannel> chan, const std::string& name, Filter::Category cat);
 
+	bool GetDetectorRange(
+		SparseAnalogWaveform* sdata,
+		UniformAnalogWaveform* udata,
+		int64_t detectorMode,
+		float& vmin,
+		float& vmax);
+
 	float PixelsToYAxisUnits(float pix);
 	float YAxisUnitsToPixels(float volt);
 	float YAxisUnitsToYPosition(float volt);

@@ -720,6 +720,22 @@ public:
 protected:
 	std::map<std::string, std::string> m_statusHelp;
 
+	///@brief Metrics that can be shown at the right side of the status bar (click to cycle)
+	enum StatusMetric
+	{
+		STATUS_METRIC_WAVEFORM_RATE,
+		STATUS_METRIC_FRAME_RATE,
+		STATUS_METRIC_FILTER_GRAPH_TIME,
+		STATUS_METRIC_PENDING_WAVEFORMS,
+
+		STATUS_METRIC_COUNT
+	};
+
+	///@brief Metric currently shown in the status bar
+	StatusMetric m_statusMetric;
+
+	std::string GetStatusMetricText();
+
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// Performance counters
 
