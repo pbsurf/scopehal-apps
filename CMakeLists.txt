@@ -160,11 +160,18 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_G
 elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Woverloaded-virtual -Wpointer-sign -Wno-gnu-zero-variadic-macro-arguments -Wno-unknown-warning-option)
 endif()
-add_compile_options(-mtune=native)
-add_compile_options("$<$<CONFIG:RELEASE>:-O3>")
-add_compile_options("$<$<CONFIG:RELWITHDEBINFO>:-O3;-g>")
-add_compile_options("$<$<CONFIG:DEBUG>:-Og;-D_DEBUG;-g>")
-add_compile_options("$<$<CONFIG:DEBUGNOOPT>:-O0;-D_DEBUG;-g>")
+if(MSVC)
+	# CMake's default MSVC flags already set optimization and debug info per build type,
+	# and /MDd defines _DEBUG in debug builds
+	add_compile_options(/utf-8 /bigobj)
+	add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX)
+else()
+	add_compile_options(-mtune=native)
+	add_compile_options("$<$<CONFIG:RELEASE>:-O3>")
+	add_compile_options("$<$<CONFIG:RELWITHDEBINFO>:-O3;-g>")
+	add_compile_options("$<$<CONFIG:DEBUG>:-Og;-D_DEBUG;-g>")
+	add_compile_options("$<$<CONFIG:DEBUGNOOPT>:-O0;-D_DEBUG;-g>")
+endif()
 
 # Needed for %zu/%zd on MSYS2, must be added here to avoid redefinition
 if(WIN32 AND (NOT MSVC))
@@ -183,7 +190,15 @@ if(SANITIZE)
 endif()
 
 if(WIN32)
-	add_compile_options(-D_USE_MATH_DEFINES -D_POSIX_THREAD_SAFE_FUNCTIONS)
+	add_compile_definitions(_USE_MATH_DEFINES _POSIX_THREAD_SAFE_FUNCTIONS)
+endif()
+
+# MinGW exports every symbol from a DLL automatically, MSVC does not, so build our libraries statically there.
+# (This also means Windows plugins can't link against scopehal when built with MSVC.)
+if(MSVC)
+	set(SCOPEHAL_LIBRARY_TYPE STATIC)
+else()
+	set(SCOPEHAL_LIBRARY_TYPE SHARED)
 endif()
 
 # Package detection
@@ -240,6 +255,8 @@ endif()
 find_package(Threads MODULE REQUIRED)
 
 # Configure and enable OpenMP
+# MSVC's default /openmp is OpenMP 2.0 (no unsigned loop indices, no tasks); use the LLVM runtime instead
+set(OpenMP_RUNTIME_MSVC "llvm")
 find_package(OpenMP MODULE)
 if(NOT OpenMP_CXX_FOUND)
 	message(FATAL_ERROR "ngscopeclient requires OpenMP but your C++ compiler does not appear to support it.")
@@ -327,7 +344,16 @@ endif()
 add_subdirectory("${PROJECT_SOURCE_DIR}/lib/scopehal")
 add_subdirectory("${PROJECT_SOURCE_DIR}/lib/scopeprotocols")
 add_subdirectory("${PROJECT_SOURCE_DIR}/lib/xptools")
-add_subdirectory("${PROJECT_SOURCE_DIR}/lib/log")
+if(MSVC)
+	# xptools includes <hidapi/hidapi.h>, but hidapi.pc's include dir is <prefix>/include/hidapi
+	# (MSYS2 and Linux get <prefix>/include from the compiler's default search path)
+	target_include_directories(xptools SYSTEM PUBLIC "${HIDAPI_INCLUDEDIR}")
+
+	# lib/log (upstream logtools) always builds a DLL on Windows, which would need symbol exports under MSVC
+	include(msvc/log.cmake)
+else()
+	add_subdirectory("${PROJECT_SOURCE_DIR}/lib/log")
+endif()
 add_subdirectory("${PROJECT_SOURCE_DIR}/src/ngscopeclient")
 add_subdirectory("${PROJECT_SOURCE_DIR}/src/nativefiledialog-extended")
 

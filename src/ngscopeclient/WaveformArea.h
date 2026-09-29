@@ -249,7 +249,7 @@ public:
 	/**
 		@brief Gets the pipeline for drawing uniform analog waveforms, creating it if necessary
 	*/
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	std::shared_ptr<ComputePipeline> GetUniformAnalogPipeline()
 	{
 		if(m_uniformAnalogComputePipeline == nullptr)
@@ -270,7 +270,7 @@ public:
 	/**
 		@brief Gets the pipeline for drawing histogram waveforms, creating it if necessary
 	*/
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	std::shared_ptr<ComputePipeline> GetHistogramPipeline()
 	{
 		if(m_histogramComputePipeline == nullptr)
@@ -289,7 +289,7 @@ public:
 	/**
 		@brief Gets the pipeline for drawing sparse analog waveforms, creating it if necessary
 	*/
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	std::shared_ptr<ComputePipeline> GetSparseAnalogPipeline()
 	{
 		if(m_sparseAnalogComputePipeline == nullptr)
@@ -314,7 +314,7 @@ public:
 	/**
 		@brief Gets the pipeline for drawing uniform digital waveforms, creating it if necessary
 	*/
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	std::shared_ptr<ComputePipeline> GetUniformDigitalPipeline()
 	{
 		if(m_uniformDigitalComputePipeline == nullptr)
@@ -333,7 +333,7 @@ public:
 	/**
 		@brief Gets the pipeline for drawing sparse digital waveforms, creating it if necessary
 	*/
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	std::shared_ptr<ComputePipeline> GetSparseDigitalPipeline()
 	{
 		if(m_sparseDigitalComputePipeline == nullptr)

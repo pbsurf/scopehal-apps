@@ -11,7 +11,12 @@
     "libpng",
     "yaml-cpp",
     "libsigcpp",
-    "sdl2",
+    {
+      "name": "sdl2",
+      "features": [
+        "vulkan"
+      ]
+    },
     "hidapi",
     "vulkan-headers",
     "vulkan-loader",

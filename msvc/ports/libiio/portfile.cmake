@@ -6,6 +6,10 @@ vcpkg_from_github(
     REF v0.26
     SHA512 f2febe8223149602e9d34957fb04892ff1d7449abf2923d0428d0db43148445a0b5595eb6d00013687c73001685b6aaaa5aa098ff67f51ec1950200330481bba
     HEAD_REF libiio-v0
+    PATCHES
+        # libiio relies on dead-code elimination to drop calls into disabled backends;
+        # MSVC does not do that at /Od, so the Debug DLL fails to link without this
+        msvc-debug-dead-code.patch
 )
 
 vcpkg_check_features(OUT_FEATURE_OPTIONS FEATURE_OPTIONS
@@ -43,6 +47,7 @@ vcpkg_cmake_configure(
         -DENABLE_PACKAGING=OFF
         -DCMAKE_DISABLE_FIND_PACKAGE_Doxygen=ON
     MAYBE_UNUSED_VARIABLES
+        CMAKE_DISABLE_FIND_PACKAGE_Doxygen
         INSTALL_UDEV_RULE
         OSX_PACKAGE
         WITH_IIOD

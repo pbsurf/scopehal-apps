@@ -1,0 +1,41 @@
+--- a/context.c
++++ b/context.c
+@@ -405,8 +405,10 @@
+ 	if (WITH_USB_BACKEND && strncmp(uri, "usb:", sizeof("usb:") - 1) == 0)
+ 		return usb_create_context_from_uri(uri);
+ 
++#if WITH_SERIAL_BACKEND
+ 	if (WITH_SERIAL_BACKEND && strncmp(uri, "serial:", sizeof("serial:") - 1) == 0)
+ 		return serial_create_context_from_uri(uri);
++#endif
+ 
+ 	errno = ENOSYS;
+ 	return NULL;
+@@ -428,8 +430,10 @@
+ 
+ struct iio_context * iio_create_local_context(void)
+ {
++#if WITH_LOCAL_BACKEND
+ 	if (WITH_LOCAL_BACKEND)
+ 		return local_create_context();
++#endif
+ 
+ 	errno = ENOSYS;
+ 	return NULL;
+--- a/scan.c
++++ b/scan.c
+@@ -43,9 +43,12 @@
+ 			token; token = iio_strtok_r(NULL, ",", &rest)) {
+ 
+ 		/* Since tokens are all null terminated, it's safe to use strcmp on them */
+-		if (WITH_LOCAL_BACKEND && !strcmp(token, "local")) {
++#if WITH_LOCAL_BACKEND
++		if (!strcmp(token, "local")) {
+ 			ret = local_context_scan(&scan_result);
+-		} else if (WITH_USB_BACKEND && (!strcmp(token, "usb") ||
++		} else
++#endif
++		if (WITH_USB_BACKEND && (!strcmp(token, "usb") ||
+ 						!strncmp(token, "usb=", sizeof("usb=") - 1))) {
+ 			token = token[3] == '=' ? token + 4 : NULL;
+ 			ret = usb_context_scan(&scan_result, token);
