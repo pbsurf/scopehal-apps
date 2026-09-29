@@ -259,6 +259,25 @@ add_custom_command(TARGET ngscopeclient POST_BUILD
 	)
 endif()
 
+#/openmp:llvm needs libomp140.x86_64.dll, which isn't a CMake target so TARGET_RUNTIME_DLLS misses it.
+#Microsoft only ships it under debug_nonredist: fine for internal testing, NOT licensed for redistribution.
+if(MSVC AND OpenMP_RUNTIME_MSVC STREQUAL "llvm" AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+	file(GLOB LIBOMP_SEARCH_DIRS
+		"$ENV{VCToolsRedistDir}/debug_nonredist/x64/Microsoft.VC*.OpenMP.LLVM"
+		"${CMAKE_CXX_COMPILER}/../../../../../../../Redist/MSVC/*/debug_nonredist/x64/Microsoft.VC*.OpenMP.LLVM")
+	find_file(LIBOMP_DLL libomp140.x86_64.dll PATHS ${LIBOMP_SEARCH_DIRS} NO_DEFAULT_PATH)
+	find_file(LIBOMP_DEBUG_DLL libomp140d.x86_64.dll PATHS ${LIBOMP_SEARCH_DIRS} NO_DEFAULT_PATH)
+	if(LIBOMP_DLL AND LIBOMP_DEBUG_DLL)
+		add_custom_command(TARGET ngscopeclient POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				$<IF:$<CONFIG:Debug>,${LIBOMP_DEBUG_DLL},${LIBOMP_DLL}> $<TARGET_FILE_DIR:ngscopeclient>
+			)
+		install(FILES $<IF:$<CONFIG:Debug>,${LIBOMP_DEBUG_DLL},${LIBOMP_DLL}> TYPE BIN)
+	else()
+		message(WARNING "libomp140.x86_64.dll not found; copy it next to ngscopeclient.exe by hand")
+	endif()
+endif()
+
 ###############################################################################
 # Installation
 
