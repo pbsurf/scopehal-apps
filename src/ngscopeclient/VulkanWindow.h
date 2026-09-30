@@ -68,6 +68,27 @@ public:
 
 	void SaveWindowPositionAndSize();
 
+	/**
+		@brief Turns vsync off (for benchmarking) or back on
+
+		Takes effect when the swapchain is recreated at the start of the next frame.
+	 */
+	void SetUncappedFramerate(bool uncapped)
+	{
+		if(uncapped != m_uncappedFramerate)
+		{
+			m_uncappedFramerate = uncapped;
+			m_resizeEventPending = true;
+		}
+	}
+
+	bool IsUncappedFramerate()
+	{ return m_uncappedFramerate; }
+
+	///@brief Present mode of the current swapchain
+	vk::PresentModeKHR GetPresentMode()
+	{ return m_presentMode; }
+
 protected:
 	bool UpdateFramebuffer();
 	void SetFullscreen(bool fullscreen);
@@ -102,6 +123,12 @@ protected:
 
 	///@brief Set true if we have to handle a resize event
 	bool m_resizeEventPending;
+
+	///@brief Set true to present without waiting for vsync (for benchmarking)
+	bool m_uncappedFramerate = false;
+
+	///@brief Present mode of the current swapchain
+	vk::PresentModeKHR m_presentMode = vk::PresentModeKHR::eFifo;
 
 	///@brief Set true if a resize was requested by software (i.e. we need to resize to m_pendingWidth / m_pendingHeight)
 	bool m_softwareResizeRequested;

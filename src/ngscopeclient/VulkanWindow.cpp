@@ -507,6 +507,25 @@ bool VulkanWindow::UpdateFramebuffer()
 		requestSurfaceColorSpace);
 	vk::Format surfaceFormat = static_cast<vk::Format>(format.format);
 
+	//FIFO (vsync) is always available. For an uncapped framerate prefer immediate, then mailbox
+	//(which also doesn't block, but drops frames instead of tearing).
+	m_presentMode = vk::PresentModeKHR::eFifo;
+	if(m_uncappedFramerate)
+	{
+		auto modes = g_vkComputePhysicalDevice->getSurfacePresentModesKHR(**m_surface);
+		for(auto want : {vk::PresentModeKHR::eImmediate, vk::PresentModeKHR::eMailbox})
+		{
+			if(find(modes.begin(), modes.end(), want) != modes.end())
+			{
+				m_presentMode = want;
+				break;
+			}
+		}
+		if(m_presentMode == vk::PresentModeKHR::eFifo)
+			LogWarning("Uncapped framerate requested, but the surface only supports vsync (FIFO) presentation\n");
+	}
+	LogTrace("Present mode: %s\n", vk::to_string(m_presentMode).c_str());
+
 	//Save old swapchain
 	unique_ptr<vk::raii::SwapchainKHR> oldSwapchain = std::move(m_swapchain);
 
@@ -527,7 +546,7 @@ bool VulkanWindow::UpdateFramebuffer()
 		{},
 		vk::SurfaceTransformFlagBitsKHR::eIdentity,
 		vk::CompositeAlphaFlagBitsKHR::eOpaque,
-		vk::PresentModeKHR::eFifo /*vk::PresentModeKHR::eImmediate*/ , //switch to eImmediate for benchmarking FPS
+		m_presentMode,
 		true,
 		oldSwapchainIfValid);
 	m_swapchain = make_unique<vk::raii::SwapchainKHR>(*g_vkComputeDevice, chainInfo);

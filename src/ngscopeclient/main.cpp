@@ -375,7 +375,9 @@ int main(int argc, char* argv[])
 			bool hadEvent = false;
 
 			//Check which event loop model to use
-			if(session.GetPreferences().GetEnumRaw("Power.Events.event_driven_ui") == 1)
+			//(never sleep with an uncapped framerate, since that's only used for benchmarking)
+			if( (session.GetPreferences().GetEnumRaw("Power.Events.event_driven_ui") == 1) &&
+				!g_mainWindow->IsUncappedFramerate() )
 			{
 				if(settleFramesLeft > 0)
 					settleFramesLeft --;

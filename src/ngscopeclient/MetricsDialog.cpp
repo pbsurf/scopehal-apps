@@ -36,6 +36,7 @@
 #include "ngscopeclient.h"
 #include "MetricsDialog.h"
 #include "Session.h"
+#include "MainWindow.h"
 
 using namespace std;
 
@@ -87,6 +88,32 @@ bool MetricsDialog::DoRender()
 			"Rate at which the user interface is being redrawn.\n\n"
 			"Capped at display refresh rate by vsync.\n"
 			"If it drops significantly lower, rendering is taking too long or the GUI thread is bogging down.");
+
+		ImGui::BeginDisabled();
+			float fps = ImGui::GetIO().Framerate;
+			str = fs.PrettyPrint(fps > 0 ? FS_PER_SECOND / fps : 0);
+			ImGui::SetNextItemWidth(width);
+			ImGui::InputText("Frame time", &str);
+		ImGui::EndDisabled();
+
+		HelpMarker(
+			"Average time to render a frame (the inverse of the framerate).\n\n"
+			"Use this rather than the framerate to compare costs, with an uncapped framerate.");
+
+		auto wnd = m_session->GetMainWindow();
+		bool uncapped = wnd->IsUncappedFramerate();
+		if(ImGui::Checkbox("Uncapped framerate", &uncapped))
+			wnd->SetUncappedFramerate(uncapped);
+		if(uncapped && (wnd->GetPresentMode() == vk::PresentModeKHR::eFifo))
+		{
+			ImGui::SameLine();
+			ImGui::TextDisabled("(not supported)");
+		}
+
+		HelpMarker(
+			"Turn off vsync and the power saving event loop so frames are drawn as fast as possible.\n\n"
+			"For benchmarking the GUI: this uses a whole CPU core and may cause tearing. "
+			"Not saved, so it's off again the next time ngscopeclient starts.");
 
 		ImGui::BeginDisabled();
 			str = hz.PrettyPrint(m_displayRefreshRate);
