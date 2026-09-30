@@ -170,6 +170,11 @@ TEST_CASE("IIO_MockRateAndBandwidth")
 	REQUIRE(ctx->ReadChannelAttrInt(phy, "voltage0", false, "sampling_frequency", rate));
 	REQUIRE(rate == 4000000);
 
+	//Like the real radio, some rates can't be hit exactly
+	REQUIRE(ctx->WriteChannelAttrInt(phy, "voltage0", false, "sampling_frequency", 30720000));
+	REQUIRE(ctx->ReadChannelAttrInt(phy, "voltage0", false, "sampling_frequency", rate));
+	REQUIRE(rate == 30719999);
+
 	//Bandwidth is clamped
 	int64_t bw;
 	REQUIRE(ctx->WriteChannelAttrInt(phy, "voltage0", false, "rf_bandwidth", 10000000));

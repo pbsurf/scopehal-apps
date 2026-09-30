@@ -59,11 +59,16 @@ StreamBrowserTimebaseInfo::StreamBrowserTimebaseInfo(shared_ptr<Oscilloscope> sc
 	else
 		m_rates = scope->GetSampleRatesNonInterleaved();
 
+	//The hardware may not be able to hit a rate exactly (an SDR asked for 30.72 MS/s may report 30719999 Hz),
+	//so select the closest one
+	m_scopeRate = rate;
 	m_rate = 0;
 	for(size_t i=0; i<m_rates.size(); i++)
 	{
 		m_rateNames.push_back(srate.PrettyPrint(m_rates[i]));
-		if(m_rates[i] == rate)
+		int64_t delta = static_cast<int64_t>(m_rates[i] - rate);
+		int64_t best = static_cast<int64_t>(m_rates[m_rate] - rate);
+		if(llabs(delta) < llabs(best))
 			m_rate = i;
 	}
 
@@ -1402,8 +1407,10 @@ shared_ptr<StreamBrowserTimebaseInfo> StreamBrowserDialog::GetTimebaseInfoFor(sh
 		m_timebaseConfig[scope] = make_shared<StreamBrowserTimebaseInfo>(scope);
 	}
 
-	//If we had info, but it's clearly out of date, recreate it
-	else if(m_timebaseConfig[scope]->GetRate() != scope->GetSampleRate())
+	//If we had info, but it's clearly out of date, recreate it.
+	//Compare to the rate it was created with, not the selected list entry, since the scope's rate may not be in the list
+	//(and recreating it every frame would reset the text of any box being edited)
+	else if(m_timebaseConfig[scope]->m_scopeRate != scope->GetSampleRate())
 	{
 		LogTrace("Recreating timebase info (out of date sample rate)\n");
 		m_timebaseConfig[scope] = make_shared<StreamBrowserTimebaseInfo>(scope);

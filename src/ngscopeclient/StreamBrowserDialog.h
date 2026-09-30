@@ -59,12 +59,8 @@ public:
 	std::vector<std::string> m_rateNames;
 	int m_rate;
 
-	uint64_t GetRate()
-	{
-		if(m_rates.empty())
-			return 0;
-		return m_rates[m_rate];
-	}
+	///@brief Sample rate the scope reported when this was created (may not be exactly one of m_rates)
+	uint64_t m_scopeRate;
 
 	//Memory depth
 	std::vector<uint64_t> m_depths;
