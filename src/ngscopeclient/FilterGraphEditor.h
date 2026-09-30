@@ -192,6 +192,9 @@ protected:
 		int64_t runtime);
 	void DoNodeForTrigger(Trigger* trig);
 	bool HandleNodeProperties();
+	void HandleTouchGestures();
+	void HandlePortContextMenu(Filter*& fReconfigure);
+	void SetPinHitArea(bool input, float yext);
 	void HandleDoubleClicks();
 	void HandleLinkCreationRequests(Filter*& fReconfigure);
 	void HandleDeletionRequests(Filter*& fReconfigure);
@@ -287,6 +290,9 @@ protected:
 
 	///@brief Node whose properties we're currently interacting with
 	ax::NodeEditor::NodeId m_selectedProperties;
+
+	///@brief Input port whose context menu is open
+	ax::NodeEditor::PinId m_selectedPort;
 
 	ImVec2 m_createMousePos;
 

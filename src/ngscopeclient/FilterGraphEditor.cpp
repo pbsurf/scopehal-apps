@@ -446,6 +446,8 @@ bool FilterGraphEditor::DoRender()
 	bool windowHovered = ImGui::IsWindowHovered();
 
 	ax::NodeEditor::SetCurrentEditor(m_context);
+	if(windowHovered)
+		HandleTouchGestures();
 	ax::NodeEditor::Begin("Filter Graph", ImVec2(0, 0));
 
 	//Update theme colors from preferences
@@ -678,6 +680,7 @@ bool FilterGraphEditor::DoRender()
 	Filter* fReconfigure = nullptr;
 	HandleLinkCreationRequests(fReconfigure);
 	HandleDeletionRequests(fReconfigure);
+	HandlePortContextMenu(fReconfigure);
 	HandleDoubleClicks();
 	bool triggerChanged = HandleNodeProperties();
 	HandleBackgroundContextMenu(windowHovered);
@@ -2183,8 +2186,8 @@ void FilterGraphEditor::DoNodeForTrigger(Trigger* trig)
 			string portname("‣ ");
 			portname += trig->GetInputName(i);
 			ax::NodeEditor::BeginPin(sid, ax::NodeEditor::PinKind::Input);
-				ax::NodeEditor::PinPivotAlignment(ImVec2(0, 0.5));
 				ImGui::TextUnformatted(portname.c_str());
+				SetPinHitArea(true, ImGui::GetStyle().ItemSpacing.y / 2);
 			ax::NodeEditor::EndPin();
 		}
 
@@ -2227,8 +2230,6 @@ void FilterGraphEditor::DoNodeForTrigger(Trigger* trig)
 
 /**
 	@brief Make a node for a single channel, of any type
-
-	TODO: this seems to fail hard if we do not have at least one input OR output on the node. Why?
  */
 void FilterGraphEditor::DoNodeForChannel(
 	InstrumentChannel* channel,
@@ -2374,7 +2375,9 @@ void FilterGraphEditor::DoNodeForChannel(
 	ssize_t hoveredInput = -1;
 	if(ImGui::BeginTable("Ports", 3, flags, ImVec2(nodewidth, 0 ) ) )
 	{
-		size_t maxports = max(channel->GetInputCount(), channel->GetStreamCount());
+		//Always emit at least one row, since the icon is positioned relative to the first one.
+		//(e.g. an import filter has no ports until a file is loaded)
+		size_t maxports = max( { channel->GetInputCount(), channel->GetStreamCount(), (size_t)1 } );
 
 		ImGui::TableSetupColumn("inputs", ImGuiTableColumnFlags_WidthFixed, iportmax + 2);
 		ImGui::TableSetupColumn("icon", ImGuiTableColumnFlags_WidthFixed, iconcolwidth + 2);
@@ -2391,8 +2394,8 @@ void FilterGraphEditor::DoNodeForChannel(
 				auto sid = GetID(pair<InstrumentChannel*, size_t>(channel, i));
 
 				ax::NodeEditor::BeginPin(sid, ax::NodeEditor::PinKind::Input);
-					ax::NodeEditor::PinPivotAlignment(ImVec2(0, 0.5));
 					ImGui::TextUnformatted(inames[i].c_str());
+					SetPinHitArea(true, ImGui::GetStyle().CellPadding.y);
 				ax::NodeEditor::EndPin();
 
 				if(sid == ax::NodeEditor::GetHoveredPin())
@@ -2413,8 +2416,8 @@ void FilterGraphEditor::DoNodeForChannel(
 				auto sid = GetID(stream);
 
 				ax::NodeEditor::BeginPin(sid, ax::NodeEditor::PinKind::Output);
-					ax::NodeEditor::PinPivotAlignment(ImVec2(1, 0.5));
 					RightJustifiedText(onames[i]);
+					SetPinHitArea(false, ImGui::GetStyle().CellPadding.y);
 				ax::NodeEditor::EndPin();
 
 				if(sid == ax::NodeEditor::GetHoveredPin())
@@ -2666,6 +2669,57 @@ void FilterGraphEditor::NodeIcon(InstrumentChannel* chan, ImVec2 pos, ImVec2 ico
 }
 
 /**
+	@brief Enlarges the hit area of a port to make it easier to click or tap, without changing how anything is drawn
+
+	Call between BeginPin() and EndPin(), right after the port label is drawn in its table cell.
+	The hit area covers the whole width of the cell out to the edge of the node, and extends above and below the label
+	to fill the gap between adjacent ports. Links still attach at the outer edge of the label.
+
+	@param input	True for an input port (left side of the node), false for an output port (right side)
+	@param yext		Distance to extend the hit area above and below the label
+ */
+void FilterGraphEditor::SetPinHitArea(bool input, float yext)
+{
+	auto labelMin = ImGui::GetItemRectMin();
+	auto labelMax = ImGui::GetItemRectMax();
+	ImVec2 pivot(input ? labelMin.x : labelMax.x, (labelMin.y + labelMax.y) / 2);
+	ax::NodeEditor::PinPivotRect(pivot, pivot);
+
+	//Port tables have no outer padding, so the cells start and end at the node padding
+	auto cell = ImGui::TableGetCellBgRect(ImGui::GetCurrentTable(), ImGui::TableGetColumnIndex());
+	auto& nodePadding = ax::NodeEditor::GetStyle().NodePadding;
+	if(input)
+		cell.Min.x -= nodePadding.x;
+	else
+		cell.Max.x += nodePadding.z;
+
+	ax::NodeEditor::PinRect(
+		ImVec2(cell.Min.x, labelMin.y - yext),
+		ImVec2(cell.Max.x, labelMax.y + yext));
+}
+
+/**
+	@brief Pans and zooms the view with two finger touchscreen gestures
+
+	Must be called before ax::NodeEditor::Begin(), since the positions are in screen coordinates
+ */
+void FilterGraphEditor::HandleTouchGestures()
+{
+	//Pinch is reported as mouse wheel, which the node editor ignores when it comes from a touchscreen.
+	//Scale by the same 1.5x per wheel step as the backend so the content tracks the fingers 1:1 (see imgui_impl_sdl2.cpp)
+	auto& io = ImGui::GetIO();
+	float zoom = 1;
+	if(io.MouseSource == ImGuiMouseSource_TouchScreen)
+		zoom = powf(1.5f, io.MouseWheel + io.MouseWheelH);
+
+	//Two finger drag pans
+	auto pan = ImGui_ImplSDL2_GetTouchPanDelta();
+
+	if( (zoom != 1) || (pan.x != 0) || (pan.y != 0) )
+		ax::NodeEditor::PanAndZoom(pan, zoom, io.MousePos);
+}
+
+/**
 	@brief Opens a persistent properties window when a node is double clicked
  */
 void FilterGraphEditor::HandleDoubleClicks()
@@ -2801,6 +2855,17 @@ bool FilterGraphEditor::HandleNodeProperties()
 			else
 				dlg->RenderAsChild();
 		}
+
+		//Only filters can be deleted (see OnNodeDeleted()).
+		//Deletion is queued and handled by HandleDeletionRequests() next frame, same as pressing the delete key
+		auto node = m_session->m_idtable.Lookup<FlowGraphNode>(static_cast<uintptr_t>(m_selectedProperties));
+		ImGui::Separator();
+		if(ImGui::MenuItem("Delete", nullptr, false, dynamic_cast<Filter*>(node) != nullptr))
+		{
+			ax::NodeEditor::DeleteNode(m_selectedProperties);
+			ImGui::CloseCurrentPopup();
+		}
+
 		ImGui::EndPopup();
 	}
 	if(ImGui::BeginPopup("Group Properties"))
@@ -2815,6 +2880,51 @@ bool FilterGraphEditor::HandleNodeProperties()
 	ax::NodeEditor::Resume();
 
 	return triggerChanged;
+}
+
+/**
+	@brief Runs the context menu for a port (right click or long press)
+
+	For now only input ports have a menu, with the option to disconnect them.
+ */
+void FilterGraphEditor::HandlePortContextMenu(Filter*& fReconfigure)
+{
+	ax::NodeEditor::PinId pin;
+	if(ax::NodeEditor::ShowPinContextMenu(&pin) && m_inputIDMap.HasEntry(pin))
+	{
+		m_selectedPort = pin;
+
+		ax::NodeEditor::Suspend();
+			ImGui::OpenPopup("Port Menu");
+		ax::NodeEditor::Resume();
+	}
+
+	ax::NodeEditor::Suspend();
+	if(ImGui::BeginPopup("Port Menu"))
+	{
+		//Make sure the node wasn't deleted while the menu was open
+		auto input = m_inputIDMap[m_selectedPort];
+		auto nodes = GetAllNodes();
+		if(find(nodes.begin(), nodes.end(), input.first) == nodes.end())
+			ImGui::CloseCurrentPopup();
+
+		else
+		{
+			bool connected = (input.first->GetInput(input.second).m_channel != nullptr);
+			if(ImGui::MenuItem("Disconnect", nullptr, false, connected))
+			{
+				input.first->SetInput(input.second, StreamDescriptor(nullptr, 0), true);
+				fReconfigure = dynamic_cast<Filter*>(input.first);
+
+				auto t = dynamic_cast<Trigger*>(input.first);
+				if(t != nullptr)
+					t->GetScope()->PushTrigger();
+			}
+		}
+
+		ImGui::EndPopup();
+	}
+	ax::NodeEditor::Resume();
 }
 
 /**
