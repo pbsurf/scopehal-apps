@@ -166,7 +166,7 @@ bool TutorialWizard::DoRender()
 
 void TutorialWizard::DrawSpeechBubble(
 		ImVec2 anchorPos,
-		[[maybe_unused]] ImGuiDir dirTip,
+		ImGuiDir dirTip,
 		string str)
 {
 	auto& prefs = m_session->GetPreferences();
@@ -221,7 +221,7 @@ void TutorialWizard::DrawSpeechBubble(
 
 void TutorialWizard::MakePathSpeechBubble(
 	ImDrawList* list,
-	ImGuiDir dirTip,
+	[[maybe_unused]] ImGuiDir dirTip,
 	ImVec2 anchorPos,
 	ImVec2 textsize,
 	float tailLength,
