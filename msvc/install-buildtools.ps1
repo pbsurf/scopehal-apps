@@ -11,11 +11,15 @@
 #   -Quiet              no progress window (default shows progress but needs no input)
 #   -Git                also install Git for Windows. Optional: vcpkg downloads its own git, but
 #                       without git on PATH the ngscopeclient version string is a placeholder.
+#   -Debugger           also install the x64 Debugging Tools for Windows from the Windows SDK (cdb,
+#                       dbgsrv, kd, and the classic windbg.exe) into Windows Kits\10\Debuggers\x64.
+#                       Useful for crash dumps and remote debugging. Not the WinDbg Store app.
 
 param(
 	[string]$InstallPath = '',
 	[switch]$Quiet,
-	[switch]$Git
+	[switch]$Git,
+	[switch]$Debugger
 )
 
 $ErrorActionPreference = 'Stop'
@@ -88,6 +92,62 @@ if ($Git) {
 		$g = Start-Process -FilePath $gitExe -ArgumentList '/VERYSILENT','/NORESTART','/SUPPRESSMSGBOXES' -Wait -PassThru
 		if ($g.ExitCode -eq 0) { Write-Host 'Git for Windows installed.' }
 		else { Write-Warning "Git installer exited with code $($g.ExitCode)." }
+	}
+}
+
+#Optionally install Debugging Tools for Windows
+
+function Get-KitsRoot {
+	(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots' -ErrorAction SilentlyContinue).KitsRoot10
+}
+
+if ($Debugger) {
+	$cdb = "$(Get-KitsRoot)Debuggers\x64\cdb.exe"
+	if (Test-Path $cdb) {
+		Write-Host "cdb is already installed: $cdb"
+	} else {
+		#Find the installed Windows SDK (Build Tools installs it as a bundle)
+		$sdk = Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
+				'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+			Where-Object { $_.DisplayName -match '^Windows Software Development Kit' -and $_.DisplayVersion } |
+			Sort-Object { [version]$_.DisplayVersion } -Descending | Select-Object -First 1
+		if (-not $sdk) {
+			Write-Warning ('No Windows SDK found. Install "Debugging Tools for Windows" ' +
+				'from https://developer.microsoft.com/windows/downloads/windows-sdk/')
+		} else {
+			#The SDK's own installer (winsdksetup.exe /features OptionId.WindowsDesktopDebuggers) can add
+			#the debuggers, but it downloads from a copy of itself in a new temp dir each run, which
+			#per-program firewalls block. So download the self-contained x64 debuggers MSI from the same
+			#location here and install it directly. This installs only the x64 tools.
+			$sdkVer = $sdk.DisplayVersion -replace '^10\.1\.', '10.0.'
+			$fwlink = 'https://go.microsoft.com/fwlink/?prd=11966&pver=1.0&plcid=0x409&clcid=0x409' +
+				"&ar=Windows10&sar=SDK&o1=$sdkVer"
+			$req = [Net.HttpWebRequest]::Create($fwlink)
+			$req.AllowAutoRedirect = $false
+			$resp = $req.GetResponse()
+			$root = $resp.Headers['Location']
+			$resp.Close()
+			if (-not $root) { Write-Error "Could not resolve the Windows SDK $sdkVer download location." }
+
+			$msiName = 'X64 Debuggers And Tools-x64_en-us.msi'
+			$msi = "$env:TEMP\$msiName"
+			Write-Host "Downloading $msiName (SDK $sdkVer)"
+			$savedProgress = $ProgressPreference
+			$ProgressPreference = 'SilentlyContinue'	#the progress bar makes Invoke-WebRequest very slow
+			Invoke-WebRequest -UseBasicParsing -Uri "$root/Installers/$msiName" -OutFile $msi
+			$ProgressPreference = $savedProgress
+
+			$msiLog = "$env:TEMP\winsdk-debuggers.log"
+			$d = Start-Process -FilePath msiexec.exe -Wait -PassThru -ArgumentList @('/i', "`"$msi`"",
+				'/qn', '/norestart', '/l*v', "`"$msiLog`"")
+			$cdb = "$(Get-KitsRoot)Debuggers\x64\cdb.exe"
+			if (($d.ExitCode -eq 0 -or $d.ExitCode -eq 3010) -and (Test-Path $cdb)) {
+				Write-Host "Debugging Tools installed: $cdb"
+				Remove-Item -Force $msi
+			} else {
+				Write-Warning "msiexec exited with code $($d.ExitCode). Log: $msiLog"
+			}
+		}
 	}
 }
 
