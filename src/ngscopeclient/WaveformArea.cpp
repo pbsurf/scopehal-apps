@@ -840,7 +840,9 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 		auto csize = ImGui::GetContentRegionAvail();
 		csize.x -= yAxisWidthSpaced;
 
-		m_width = csize.x;
+		//If the area is narrower than the Y axis (like when the window is minimized) there's no room for the plot.
+		//Don't let the width go negative, since it's used as an unsigned pixel count.
+		m_width = max(csize.x, 0.0f);
 		m_plotPos = pos;
 		m_plotSize = csize;
 
@@ -2502,6 +2504,10 @@ void WaveformArea::RasterizeAnalogOrDigitalWaveform(
 		LogWarning("WaveformArea has negative height, cannot render\n");
 		return;
 	}
+
+	//No room for the plot, nothing to draw
+	if(m_width < 1)
+		return;
 
 	NamedDebugRange shaderRange(cmdbuf, "WaveformArea::RasterizeAnalogOrDigitalWaveform");
 
