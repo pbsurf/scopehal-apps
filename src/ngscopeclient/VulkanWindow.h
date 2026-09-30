@@ -102,6 +102,7 @@ protected:
 
 	virtual void DoRender(vk::raii::CommandBuffer& cmdBuf);
 	virtual void RenderUI();
+	void ScrollWithTouchPan();
 
 	///@brief The underlying SDL window object
 	SDL_Window* m_window;

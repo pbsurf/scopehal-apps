@@ -39,6 +39,7 @@
 #include "VulkanFFTPlan.h"
 #include "PreferenceManager.h"
 #include "PreferenceTypes.h"
+#include "imgui_internal.h"	//for scrolling windows by touch pan
 
 using namespace std;
 
@@ -652,6 +653,7 @@ void VulkanWindow::Render()
 	}
 	ImGui_ImplSDL2_NewFrame();
 	ImGui::NewFrame();
+	ScrollWithTouchPan();
 
 	//Make sure the old frame has completed
 	//Otherwise we risk modifying textures that last frame is still using
@@ -793,6 +795,53 @@ void VulkanWindow::Render()
 
 void VulkanWindow::RenderUI()
 {
+}
+
+/**
+	@brief Scrolls the window under a two finger touchscreen drag so its content follows the fingers
+
+	Picks the target window the same way Dear ImGui picks the window to scroll with the mouse wheel
+	(see FindBestWheelingWindow() in imgui.cpp), separately for each axis. Pinch zoom is reported as mouse wheel
+	and doesn't scroll windows (see UpdateMouseWheel()), so this is the only way touch scrolls a window.
+
+	Must be called after ImGui::NewFrame() and before any windows are submitted.
+ */
+void VulkanWindow::ScrollWithTouchPan()
+{
+	auto pan = ImGui_ImplSDL2_GetTouchPanDelta();
+	if( (pan.x == 0) && (pan.y == 0) )
+		return;
+
+	auto& g = *ImGui::GetCurrentContext();
+	for(int axis = 0; axis < 2; axis ++)
+	{
+		if(pan[axis] == 0)
+			continue;
+
+		//Bubble up from the hovered window to the nearest one that can scroll on this axis
+		ImGuiWindow* window = g.HoveredWindow;
+		while(window)
+		{
+			bool canScroll = (window->ScrollMax[axis] != 0) && !(window->Flags & ImGuiWindowFlags_NoScrollWithMouse);
+			if(canScroll || !(window->Flags & ImGuiWindowFlags_ChildWindow))
+				break;
+			window = window->ParentWindow;
+		}
+		if(!window || window->Collapsed || (window->ScrollMax[axis] == 0) )
+			continue;
+		if(window->Flags & (ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoMouseInputs) )
+			continue;
+
+		//Don't scroll if something in the window is using the wheel (e.g. waveform areas), since it will want the gesture too
+		auto key = (axis == ImGuiAxis_X) ? ImGuiKey_MouseWheelX : ImGuiKey_MouseWheelY;
+		if(!ImGui::TestKeyOwner(key, window->ID))
+			continue;
+
+		if(axis == ImGuiAxis_X)
+			ImGui::SetScrollX(window, window->Scroll.x - pan.x);
+		else
+			ImGui::SetScrollY(window, window->Scroll.y - pan.y);
+	}
 }
 
 void VulkanWindow::DoRender(vk::raii::CommandBuffer& /*cmdBuf*/)
