@@ -164,7 +164,8 @@ public:
 /**
 	@brief State for a single peak label
 
-	All positions/sizes are in waveform units, not screen units, so that they scale/move correctly with the waveform
+	The peak position is in waveform units. The label position is a pixel offset from the peak, so the label moves
+	with the peak and keeps its distance on screen when zooming
 
 	X axis positions are in base units, not scaled by timebase
  */
@@ -173,11 +174,8 @@ struct PeakLabel
 	///@brief Unique ID, so a label can be tracked while the vector holding it changes
 	uint64_t m_id;
 
-	///@brief X axis position of the label's centroid
-	int64_t m_labelXpos;
-
-	///@brief Y axis position of the label's centroid
-	float m_labelYpos;
+	///@brief Offset from the peak to the label's centroid, in pixels
+	ImVec2 m_labelOffset;
 
 	///@brief X axis position of the peak last refresh
 	int64_t m_peakXpos;
@@ -185,20 +183,17 @@ struct PeakLabel
 	///@brief Y axis position of the peak last refresh
 	float m_peakYpos;
 
-	///@brief X axis size of the label (for collision detection)
-	int64_t m_labelXsize;
-
-	///@brief Y axis size of the label (for collision detection)
-	int64_t m_labelYsize;
+	///@brief Size of the label box in pixels, including padding (for collision detection)
+	ImVec2 m_labelSize;
 
 	/**
-		@brief Alpha decay. Decays by a small amount per frame after the peak disappears
+		@brief Alpha decay. Decays at a fixed rate after the peak disappears
 
 		255 = fully visible
 		0 = invisible
-		Negative = invisible for several frames (eventually will be garbage collected)
+		Negative = invisible for a while (eventually will be garbage collected)
 	 */
-	int m_peakAlpha;
+	float m_peakAlpha;
 
 	///@brief Calculated FWHM of the peak
 	float m_fwhm;
