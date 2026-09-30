@@ -163,7 +163,8 @@ endif()
 if(MSVC)
 	# CMake's default MSVC flags already set optimization and debug info per build type,
 	# and /MDd defines _DEBUG in debug builds
-	add_compile_options(/utf-8 /bigobj)
+	# C4068: unknown pragma (scopehal.h has #pragma GCC diagnostic for GCC's warnings)
+	add_compile_options(/utf-8 /bigobj /wd4068)
 	add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX)
 else()
 	add_compile_options(-mtune=native)
