@@ -3056,10 +3056,149 @@ void WaveformArea::RenderBackgroundGradient(ImVec2 start, ImVec2 size)
 }
 
 /**
+	@brief Draws a horizontal or vertical grid line, solid or dashed
+
+	Grid lines are axis aligned and pixel snapped, so a solid line is a single untextured rectangle. A dashed line
+	is a rectangle textured with the dash pattern from MainWindow::GetGridDashTexture(), one texel per pixel, so it
+	costs the same number of vertices as a solid one whatever the dash length. Lines longer than the texture are
+	split into pieces that each start on a whole texture width, so the pattern stays continuous.
+
+	@param list		Draw list to add to
+	@param dashTex	Dash pattern texture, or null for a solid line
+	@param texWidth	Width of dashTex in pixels
+	@param vertical	True for a vertical line at X = pos, false for a horizontal line at Y = pos
+	@param pos		Position of the line (rounded to a whole pixel)
+	@param from		Top or left end of the line; the dash pattern starts here so all lines stay in phase
+	@param to		Bottom or right end of the line
+	@param color	Line color
+	@param width	Line width in pixels
+ */
+static void AddGridLine(
+	ImDrawList* list,
+	Texture* dashTex,
+	int texWidth,
+	bool vertical,
+	float pos,
+	float from,
+	float to,
+	ImU32 color,
+	float width)
+{
+	if(to <= from)
+		return;
+
+	//Center the line on the pixel, same as AddLine()
+	float lo = pos + 0.5f - width/2;
+	float hi = pos + 0.5f + width/2;
+
+	if(!dashTex)
+	{
+		if(vertical)
+			list->AddRectFilled(ImVec2(lo, from), ImVec2(hi, to), color);
+		else
+			list->AddRectFilled(ImVec2(from, lo), ImVec2(to, hi), color);
+		return;
+	}
+
+	//Start the pattern on a whole pixel so texel centers land on pixel centers.
+	//U runs along the line; the texture is one texel high so V doesn't matter.
+	float w = texWidth;
+	for(float start = floor(from); start < to; start += w)
+	{
+		float a = max(start, from);
+		float b = min(start + w, to);
+		float ua = (a - start) / w;
+		float ub = (b - start) / w;
+		if(vertical)
+		{
+			list->AddImageQuad(
+				dashTex->GetTexture(),
+				ImVec2(lo, a), ImVec2(hi, a), ImVec2(hi, b), ImVec2(lo, b),
+				ImVec2(ua, 0), ImVec2(ua, 1), ImVec2(ub, 1), ImVec2(ub, 0),
+				color);
+		}
+		else
+			list->AddImage(dashTex->GetTexture(), ImVec2(a, lo), ImVec2(b, hi), ImVec2(ua, 0), ImVec2(ub, 1), color);
+	}
+}
+
+/**
 	@brief Renders grid lines
  */
 void WaveformArea::RenderGrid(ImVec2 start, ImVec2 size, map<float, float>& gridmap, float& vbot, float& vtop)
 {
+	//Style settings
+	auto& prefs = m_parent->GetSession().GetPreferences();
+	auto axisColor = prefs.GetColor("Appearance.Graphs.grid_centerline_color");
+	auto gridColor = prefs.GetColor("Appearance.Graphs.grid_color");
+	auto minorColor = prefs.GetColor("Appearance.Graphs.grid_minor_color");
+	auto axisWidth = prefs.GetReal("Appearance.Graphs.grid_centerline_width");
+	auto gridWidth = prefs.GetReal("Appearance.Graphs.grid_width");
+	auto vgrid = prefs.GetEnum<VerticalGridMode>("Appearance.Graphs.vertical_grid");
+
+	//Dash pattern, in whole pixels so the texture maps one texel per pixel. Solid if either length is zero.
+	//(Capped so a silly value can't make a huge texture)
+	float dashPref = prefs.GetReal("Appearance.Graphs.grid_dash_length");
+	float gapPref = prefs.GetReal("Appearance.Graphs.grid_gap_length");
+	Texture* dashTex = nullptr;
+	int texWidth = 0;
+	if( (dashPref > 0) && (gapPref > 0) )
+	{
+		int dash = min(max((int)round(dashPref), 1), 1024);
+		int gap = min(max((int)round(gapPref), 1), 1024);
+		auto tex = m_parent->GetGridDashTexture(dash, gap, texWidth);
+		m_parent->AddTextureUsedThisFrame(tex);
+		dashTex = tex.get();
+	}
+
+	auto list = ImGui::GetWindowDrawList();
+	float left = start.x;
+	float right = start.x + size.x;
+	float top = start.y;
+	float bottom = start.y + size.y;
+
+	//Bind the dash texture once around each batch of grid lines. Otherwise AddImage() switches to it and back for
+	//every line, and each switch starts a new draw command.
+	//(Solid lines must be drawn without it bound, since they use the font atlas' white pixel)
+	//Sample it with nearest neighbor so dash edges stay sharp, then go back to the backend's default of linear.
+	auto& pio = ImGui::GetPlatformIO();
+	auto beginGridLines = [&]()
+	{
+		if(!dashTex)
+			return;
+		if(pio.DrawCallback_SetSamplerNearest)
+			list->AddCallback(pio.DrawCallback_SetSamplerNearest, nullptr);
+		list->PushTexture(dashTex->GetTexture());
+	};
+	auto endGridLines = [&]()
+	{
+		if(!dashTex)
+			return;
+		list->PopTexture();
+		if(pio.DrawCallback_SetSamplerLinear)
+			list->AddCallback(pio.DrawCallback_SetSamplerLinear, nullptr);
+	};
+
+	//Vertical lines at the timeline's graduations (drawn for all areas, not just analog ones)
+	beginGridLines();
+	if(vgrid == VERTICAL_GRID_MAJOR_MINOR)
+	{
+		for(auto dx : m_group->GetMinorGridPositions())
+		{
+			float x = round(left + dx);
+			AddGridLine(list, dashTex, texWidth, true, x, top, bottom, minorColor, gridWidth);
+		}
+	}
+	if(vgrid != VERTICAL_GRID_OFF)
+	{
+		for(auto dx : m_group->GetMajorGridPositions())
+		{
+			float x = round(left + dx);
+			AddGridLine(list, dashTex, texWidth, true, x, top, bottom, gridColor, gridWidth);
+		}
+	}
+	endGridLines();
+
 	//Early out if we're not displaying any analog waveforms
 	auto stream = GetFirstAnalogOrDensityStream();
 	if(!stream)
@@ -3139,25 +3278,13 @@ void WaveformArea::RenderGrid(ImVec2 start, ImVec2 size, map<float, float>& grid
 			break;
 	}
 
-	//Style settings
-	auto& prefs = m_parent->GetSession().GetPreferences();
-	auto axisColor = prefs.GetColor("Appearance.Graphs.grid_centerline_color");
-	auto gridColor = prefs.GetColor("Appearance.Graphs.grid_color");
-	auto axisWidth = prefs.GetReal("Appearance.Graphs.grid_centerline_width");
-	auto gridWidth = prefs.GetReal("Appearance.Graphs.grid_width");
-
-	auto list = ImGui::GetWindowDrawList();
-	float left = start.x;
-	float right = start.x + size.x;
+	beginGridLines();
 	for(auto it : gridmap)
 	{
 		float y = round(it.second);
-		list->AddLine(
-			ImVec2(left, y),
-			ImVec2(right, y),
-			gridColor,
-			gridWidth);
+		AddGridLine(list, dashTex, texWidth, false, y, left, right, gridColor, gridWidth);
 	}
+	endGridLines();
 
 	//draw Y=0 line
 	if( (yzero > ytop) && (yzero < ybot) )

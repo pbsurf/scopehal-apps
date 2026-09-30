@@ -85,6 +85,13 @@ enum NumericValueDisplay
 	NUMERIC_DISPLAY_DEFAULT_FONT
 };
 
+enum VerticalGridMode
+{
+	VERTICAL_GRID_OFF,
+	VERTICAL_GRID_MAJOR,
+	VERTICAL_GRID_MAJOR_MINOR
+};
+
 enum IconTheme_t
 {
 	ICON_THEME_LIGHT,

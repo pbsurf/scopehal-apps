@@ -654,6 +654,18 @@ protected:
 
 	TextureManager m_texmgr;
 
+	///@brief Dash pattern for grid lines (see GetGridDashTexture())
+	std::shared_ptr<Texture> m_gridDashTexture;
+
+	///@brief Dash length of m_gridDashTexture, in pixels
+	int m_gridDashLength = 0;
+
+	///@brief Gap length of m_gridDashTexture, in pixels
+	int m_gridGapLength = 0;
+
+	///@brief Width of m_gridDashTexture, in pixels (a whole number of dash + gap periods)
+	int m_gridDashTextureWidth = 0;
+
 	/**
 		@brief True if a resize or other event this frame requires we re-rasterize waveforms
 
@@ -692,6 +704,8 @@ public:
 
 	TextureManager* GetTextureManager()
 	{ return &m_texmgr; }
+
+	std::shared_ptr<Texture> GetGridDashTexture(int dash, int gap, int& width);
 
 	std::string GetIconForFilter(Filter* f);
 

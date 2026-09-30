@@ -476,11 +476,40 @@ void TextureManager::LoadTexture(
 		return;
 
 	auto rowPtrs = png_get_rows(png, info);
-
-	int bytesPerComponent = 1;
-	size_t bytesPerPixel = 4*bytesPerComponent;
 	LogTrace("Image is %zu x %zu pixels, RGBA8888\n", width, height);
-	VkDeviceSize size = width * height * bytesPerPixel;
+
+	//Pack the rows together
+	size_t rowSize = width * 4;
+	vector<uint8_t> pixels(rowSize * height);
+	for(size_t y=0; y<height; y++)
+		memcpy(pixels.data() + (y*rowSize), rowPtrs[y], rowSize);
+
+	m_textures[name] = CreateTexture(name, width, height, pixels.data());
+
+	//Clean up
+	png_destroy_read_struct(&png, &info, &end);
+	fclose(fp);
+}
+
+/**
+	@brief Creates a texture from RGBA8888 pixel data in memory
+
+	The texture isn't added to the named resources, so the caller owns it.
+
+	@param name				Debug name for the texture
+	@param width			Width in pixels
+	@param height			Height in pixels
+	@param rgba				Pixel data, width*height*4 bytes with no padding between rows
+	@param upsampleLinear	True for linear upsampling, false for nearest neighbor
+ */
+shared_ptr<Texture> TextureManager::CreateTexture(
+	const string& name,
+	size_t width,
+	size_t height,
+	const uint8_t* rgba,
+	bool upsampleLinear)
+{
+	VkDeviceSize size = width * height * 4;
 
 	//Allocate temporary staging buffer
 	//TODO: reuse buffers as much as possible to avoid constant reallocations
@@ -513,10 +542,8 @@ void TextureManager::LoadTexture(
 	auto mappedPtr = reinterpret_cast<uint8_t*>(physMem.mapMemory(0, req.size));
 	stagingBuf.bindMemory(*physMem, 0);
 
-	//Fill the mapped buffer with image data from the PNG
-	size_t rowSize = width * bytesPerPixel;
-	for(size_t y=0; y<height; y++)
-		memcpy(mappedPtr + (y*rowSize), rowPtrs[y], rowSize);
+	//Fill the mapped buffer with the image data
+	memcpy(mappedPtr, rgba, size);
 	physMem.unmapMemory();
 
 	//Make the texture object
@@ -534,9 +561,6 @@ void TextureManager::LoadTexture(
 		{},
 		vk::ImageLayout::eUndefined
 		);
-	m_textures[name] = make_shared<Texture>(*g_vkComputeDevice, imageInfo, stagingBuf, width, height, this, name);
-
-	//Clean up
-	png_destroy_read_struct(&png, &info, &end);
-	fclose(fp);
+	return make_shared<Texture>(
+		*g_vkComputeDevice, imageInfo, stagingBuf, width, height, this, name, upsampleLinear);
 }

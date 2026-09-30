@@ -111,6 +111,13 @@ public:
 		const std::string& name,
 		const std::string& path);
 
+	std::shared_ptr<Texture> CreateTexture(
+		const std::string& name,
+		size_t width,
+		size_t height,
+		const uint8_t* rgba,
+		bool upsampleLinear = true);
+
 	SDL_Surface* LoadPNGToSDLSurface(const std::string& path);
 
 	ImTextureID GetTexture(const std::string& name)

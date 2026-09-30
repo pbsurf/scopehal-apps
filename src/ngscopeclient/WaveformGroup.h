@@ -121,6 +121,14 @@ public:
 	int64_t GetXAxisOffset()
 	{ return m_xAxisOffset; }
 
+	///@brief X positions of vertical major grid lines (computed by RenderTimeline()), relative to the plot's left edge
+	const std::vector<float>& GetMajorGridPositions()
+	{ return m_majorGridX; }
+
+	///@brief X positions of vertical minor grid lines (computed by RenderTimeline()), relative to the plot's left edge
+	const std::vector<float>& GetMinorGridPositions()
+	{ return m_minorGridX; }
+
 	void ClearPersistence();
 
 	float GetYAxisWidth()
@@ -261,6 +269,12 @@ protected:
 
 	///@brief Height of the timeline
 	float m_timelineHeight;
+
+	///@brief X positions of the timeline's labeled graduations, in pixels from the left edge of the plot
+	std::vector<float> m_majorGridX;
+
+	///@brief X positions of the timeline's fine ticks, in pixels from the left edge of the plot
+	std::vector<float> m_minorGridX;
 
 	///@brief True if clearing persistence
 	std::atomic<bool> m_clearPersistence;

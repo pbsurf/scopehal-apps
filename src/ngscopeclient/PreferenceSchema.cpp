@@ -432,7 +432,11 @@ void PreferenceManager::InitializeDefaults()
 			graphs.AddPreference(
 				Preference::ThemedColor("grid_color", ColorFromString("#c0c0c040"), ColorFromString("#c0c0c040"))
 				.Label("Grid color")
-				.Description("Color for grid lines at Y=0"));
+				.Description("Color for grid lines"));
+			graphs.AddPreference(
+				Preference::ThemedColor("grid_minor_color", ColorFromString("#c0c0c020"), ColorFromString("#c0c0c020"))
+				.Label("Minor grid color")
+				.Description("Color for minor vertical grid lines"));
 			graphs.AddPreference(
 				Preference::Real("grid_centerline_width", 1)
 				.Label("Axis width")
@@ -441,6 +445,25 @@ void PreferenceManager::InitializeDefaults()
 				Preference::Real("grid_width", 1)
 				.Label("Grid width")
 				.Description("Width of grid lines"));
+			graphs.AddPreference(
+				Preference::Enum("vertical_grid", VERTICAL_GRID_OFF)
+				.Label("Vertical grid")
+				.Description(
+					"Draw vertical grid lines at the labeled graduations of the timeline (major), "
+					"or also at its fine ticks (major and minor)")
+				.EnumValue("Off", VERTICAL_GRID_OFF)
+				.EnumValue("Major", VERTICAL_GRID_MAJOR)
+				.EnumValue("Major and minor", VERTICAL_GRID_MAJOR_MINOR));
+			graphs.AddPreference(
+				Preference::Real("grid_dash_length", 0)
+				.Label("Grid dash length")
+				.Description(
+					"Length in pixels of the dashes in grid lines, rounded to a whole pixel (0 for solid lines).\n"
+					"A dash length of 1 with a gap of 3 gives a dotted grid."));
+			graphs.AddPreference(
+				Preference::Real("grid_gap_length", 3)
+				.Label("Grid gap length")
+				.Description("Length in pixels of the gaps between dashes in grid lines, rounded to a whole pixel (0 for solid lines)"));
 			graphs.AddPreference(
 				Preference::ThemedColor("y_axis_text_color", ColorFromString("#000000ff"), ColorFromString("#ffffffff"))
 				.Label("Y axis text color")

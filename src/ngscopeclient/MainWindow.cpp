@@ -199,10 +199,51 @@ MainWindow::~MainWindow()
 	lock_guard<shared_mutex> lock(g_vulkanActivityMutex);
 	g_vkComputeDevice->waitIdle();
 	m_texmgr.clear();
+	m_gridDashTexture = nullptr;
 
 	m_cmdBuffer = nullptr;
 
 	CloseSession();
+}
+
+/**
+	@brief Returns a texture for drawing dashed grid lines, creating it if the pattern changed
+
+	The texture is one texel high and holds the dash pattern repeated a whole number of times, up to 4096 texels
+	(the smallest maxImageDimension2D Vulkan allows). Dash texels are opaque white and gap texels are transparent,
+	so the line color comes from the vertex color.
+
+	The pattern is repeated in the texture rather than with a repeating sampler because the imgui Vulkan backend
+	ignores the sampler passed to ImGui_ImplVulkan_AddTexture() and only has clamp-to-edge samplers. Lines longer
+	than the texture are drawn in several pieces (see AddGridLine() in WaveformArea.cpp).
+
+	@param dash		Dash length in pixels (at least 1)
+	@param gap		Gap length in pixels (at least 1)
+	@param width	Returns the width of the texture in pixels
+ */
+shared_ptr<Texture> MainWindow::GetGridDashTexture(int dash, int gap, int& width)
+{
+	if(!m_gridDashTexture || (dash != m_gridDashLength) || (gap != m_gridGapLength) )
+	{
+		int period = dash + gap;
+		int w = period * max(1, 4096 / period);
+
+		//Anything still drawing with the old texture holds a reference to it via AddTextureUsedThisFrame()
+		vector<uint32_t> pixels(w, 0);
+		for(int i=0; i<w; i++)
+		{
+			if( (i % period) < dash)
+				pixels[i] = 0xffffffff;
+		}
+		m_gridDashTexture = m_texmgr.CreateTexture(
+			"grid-dash", w, 1, reinterpret_cast<const uint8_t*>(pixels.data()), false);
+		m_gridDashLength = dash;
+		m_gridGapLength = gap;
+		m_gridDashTextureWidth = w;
+	}
+
+	width = m_gridDashTextureWidth;
+	return m_gridDashTexture;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

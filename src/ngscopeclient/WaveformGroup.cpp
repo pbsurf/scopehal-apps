@@ -1046,6 +1046,10 @@ void WaveformGroup::RenderTimeline(float width, float height)
 	float thinLineWidth = 1;
 	float ymid = pos.y + height/2;
 
+	//Grid line positions for the waveform areas, filled in as the ticks are drawn
+	m_majorGridX.clear();
+	m_minorGridX.clear();
+
 	//Top line
 	list->PathLineTo(pos);
 	list->PathLineTo(ImVec2(pos.x + width, pos.y));
@@ -1120,6 +1124,7 @@ void WaveformGroup::RenderTimeline(float width, float height)
 				continue;
 			if(subx > width)
 				break;
+			m_minorGridX.push_back(subx);
 			subx += pos.x;
 
 			list->PathLineTo(ImVec2(subx, pos.y));
@@ -1133,6 +1138,7 @@ void WaveformGroup::RenderTimeline(float width, float height)
 			break;
 
 		//Coarse ticks
+		m_majorGridX.push_back(x);
 		x += pos.x;
 		list->PathLineTo(ImVec2(x, pos.y));
 		list->PathLineTo(ImVec2(x, pos.y + coarseTickLength));
