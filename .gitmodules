@@ -9,7 +9,7 @@
 	url = https://github.com/pbsurf/ngscopeclient-imgui.git
 [submodule "src/imgui-node-editor"]
 	path = src/imgui-node-editor
-	url = https://github.com/ngscopeclient/imgui-node-editor.git
+	url = https://github.com/pbsurf/imgui-node-editor.git
 [submodule "src/ImGuiFileDialog"]
 	path = src/ImGuiFileDialog
 	url = https://github.com/aiekick/ImGuiFileDialog
