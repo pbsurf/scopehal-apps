@@ -376,6 +376,9 @@ WaveformArea::WaveformArea(StreamDescriptor stream, shared_ptr<WaveformGroup> gr
 	, m_plotPos(0, 0)
 	, m_plotSize(0, 0)
 	, m_panDraggedY(false)
+	, m_tapZoomAnchor(0)
+	, m_tapZoomStartScale(0)
+	, m_tapZoomActive(false)
 	, m_group(group)
 	, m_parent(parent)
 	, m_tLastMouseMove(GetTime())
@@ -880,6 +883,16 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 					OnMouseWheelPlotArea(wheel, wheel_h);
 			}
 
+			//Dragging on the plot pans or zooms, unless there's a cursor or something else to drag instead
+			bool canDragPlot =
+				(m_dragState == DRAG_STATE_NONE) &&
+				(m_yAxisCursorMode == Y_CURSOR_NONE) &&
+				m_group->CanPanByDragging() &&
+				!m_mouseOverButton &&
+				!m_mouseOverTriggerArrow &&
+				(ImGui::GetDragDropPayload() == nullptr) &&
+				!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+
 			//Ctrl+drag zooms to a box. This takes priority over everything below, including cursors.
 			if( ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
 				ImGui::IsKeyDown(ImGuiMod_Ctrl) &&
@@ -889,15 +902,23 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 				m_zoomBoxStart = ImGui::GetMousePos();
 			}
 
-			//Dragging on the plot pans, unless there's a cursor or something else to drag instead
-			else if( ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-				(m_dragState == DRAG_STATE_NONE) &&
-				(m_yAxisCursorMode == Y_CURSOR_NONE) &&
-				m_group->CanPanByDragging() &&
-				!m_mouseOverButton &&
-				!m_mouseOverTriggerArrow &&
-				(ImGui::GetDragDropPayload() == nullptr) &&
-				!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) )
+			//Double tap (or double click) and drag vertically zooms the horizontal axis, for touch input.
+			//Checked before drag start, so the second tap doesn't begin a pan.
+			//The touch backend detects double taps itself, since imgui's double click timing is unreliable for touch
+			//(the backend delays each press until the finger is lifted or has moved)
+			else if(canDragPlot &&
+				( (ImGui::GetIO().MouseSource == ImGuiMouseSource_TouchScreen) ?
+					(ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui_ImplSDL2_IsTouchDoubleTap()) :
+					ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) ) )
+			{
+				m_dragState = DRAG_STATE_TAP_ZOOM;
+				m_tapZoomStart = ImGui::GetMousePos();
+				m_tapZoomAnchor = m_group->XPositionToXAxisUnits(m_tapZoomStart.x);
+				m_tapZoomStartScale = m_group->GetPixelsPerXUnit();
+				m_tapZoomActive = false;
+			}
+
+			else if(ImGui::IsMouseClicked(ImGuiMouseButton_Left) && canDragPlot)
 			{
 				m_dragState = DRAG_STATE_PAN;
 				m_panDraggedY = false;
@@ -953,6 +974,8 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 		{
 			m_parent->AddStatusHelp("mouse_lmb_drag", "Zoom to box");
 		}
+		else if(m_dragState == DRAG_STATE_TAP_ZOOM)
+			m_parent->AddStatusHelp("mouse_lmb_drag", "Drag down to zoom in, up to zoom out");
 		else if( (m_dragState == DRAG_STATE_PAN) ||
 			( (m_dragState == DRAG_STATE_NONE) && (m_yAxisCursorMode == Y_CURSOR_NONE) && m_group->CanPanByDragging() ) )
 		{
@@ -3521,6 +3544,15 @@ void WaveformArea::RenderCursors(ImVec2 start, ImVec2 size)
 		draw_list->AddRect(a, b, IM_COL32(255, 255, 255, 200));
 	}
 
+	//Mark the point a double tap zoom is centered on
+	if( (m_dragState == DRAG_STATE_TAP_ZOOM) && m_tapZoomActive)
+	{
+		draw_list->AddLine(
+			ImVec2(m_tapZoomStart.x, start.y),
+			ImVec2(m_tapZoomStart.x, start.y + size.y),
+			IM_COL32(255, 255, 255, 128));
+	}
+
 	//See if the waveform group is dragging a trigger
 	if(m_group->IsDraggingTrigger())
 	{
@@ -5227,6 +5259,10 @@ void WaveformArea::OnDragUpdate()
 				m_dragState = DRAG_STATE_NONE;
 			break;
 
+		case DRAG_STATE_TAP_ZOOM:
+			OnTapZoomDrag();
+			break;
+
 		case DRAG_STATE_PEAK_MARKER:
 			if(auto label = GetDragPeakLabel())
 			{
@@ -5306,6 +5342,48 @@ void WaveformArea::OnPinchZoom(float delta, float delta_h)
 		OnMouseWheelPlotArea(delta_h, 0);
 	if(delta != 0)
 		OnMouseWheelYAxis(delta, 1.0f / 1.5f);
+}
+
+/**
+	@brief Handles vertical motion during a double tap and drag zoom
+
+	Like the one finger zoom in map apps: dragging down zooms in and dragging up zooms out, around the X axis
+	position under the second tap. Horizontal motion is ignored.
+ */
+void WaveformArea::OnTapZoomDrag()
+{
+	//Scale thresholds with the font so they're a similar physical size regardless of DPI
+	float fontSize = ImGui::GetFontSize();
+	float slop = fontSize;					//Movement allowed before zooming starts, so a sloppy tap doesn't zoom
+	float pixelsPerStep = 3 * fontSize;		//Vertical travel for one 1.5x zoom step (same as a wheel notch)
+
+	float dy = ImGui::GetMousePos().y - m_tapZoomStart.y;
+	if(!m_tapZoomActive)
+	{
+		if(fabs(dy) < slop)
+			return;
+
+		//Measure from where the threshold was crossed so the zoom doesn't jump
+		m_tapZoomActive = true;
+		m_tapZoomStart.y += (dy > 0) ? slop : -slop;
+		dy = ImGui::GetMousePos().y - m_tapZoomStart.y;
+
+		//If in the tutorial, ungate the wizard
+		auto tutorial = m_parent->GetTutorialWizard();
+		if(tutorial && (tutorial->GetCurrentStep() == TutorialWizard::TUTORIAL_04_SCROLLZOOM) )
+			tutorial->EnableNextStep();
+	}
+
+	ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+
+	//Zoom from the starting scale using total travel (not per frame deltas), so it doesn't drift and
+	//dragging back to the starting point restores the original zoom
+	float scale = m_tapZoomStartScale * pow(1.5, dy / pixelsPerStep);
+	if(scale != m_group->GetPixelsPerXUnit())
+	{
+		m_group->ZoomHorizontalAround(m_tapZoomAnchor, m_tapZoomStart.x, scale);
+		m_parent->SetNeedRender();
+	}
 }
 
 /**

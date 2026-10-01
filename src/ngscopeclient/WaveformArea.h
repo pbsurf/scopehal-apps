@@ -695,7 +695,8 @@ protected:
 		DRAG_STATE_Y_CURSOR0,
 		DRAG_STATE_Y_CURSOR1,
 		DRAG_STATE_PAN,
-		DRAG_STATE_ZOOM_BOX
+		DRAG_STATE_ZOOM_BOX,
+		DRAG_STATE_TAP_ZOOM
 	} m_dragState;
 
 	///@brief Where the mouse went down when in DRAG_STATE_ZOOM_BOX (screen coordinates)
@@ -708,6 +709,18 @@ protected:
 	///@brief True if we moved the Y axis offset during the current DRAG_STATE_PAN
 	bool m_panDraggedY;
 
+	///@brief Where the second tap of a double tap zoom went down (screen coordinates)
+	ImVec2 m_tapZoomStart;
+
+	///@brief X axis position under the second tap of a double tap zoom, which stays fixed while zooming
+	int64_t m_tapZoomAnchor;
+
+	///@brief Horizontal scale of the group when the double tap zoom began
+	float m_tapZoomStartScale;
+
+	///@brief True once a double tap zoom has moved far enough vertically to start zooming
+	bool m_tapZoomActive;
+
 	///@brief The stream currently being dragged (invalid if m_dragState != DRAG_STATE_CHANNEL)
 	StreamDescriptor m_dragStream;
 
@@ -719,6 +732,7 @@ protected:
 	bool CanZoomByDragging();
 	void ApplyZoomBox();
 	void OnPinchZoom(float delta, float delta_h);
+	void OnTapZoomDrag();
 	void OnMouseUp();
 	void OnDragUpdate();
 

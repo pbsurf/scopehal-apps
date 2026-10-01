@@ -196,6 +196,7 @@ public:
 
 	void AutofitHorizontal(float width);
 	void ZoomToXRange(int64_t start, int64_t end, float width);
+	void ZoomHorizontalAround(int64_t target, float xpos, float pixelsPerXUnit);
 
 protected:
 	void RenderTimeline(float width, float height);

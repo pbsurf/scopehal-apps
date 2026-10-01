@@ -1697,6 +1697,23 @@ void WaveformGroup::ZoomToXRange(int64_t start, int64_t end, float width)
 	ClearPersistence();
 }
 
+/**
+	@brief Sets the horizontal zoom, keeping a given X axis value at a given pixel position
+
+	@param target			X axis value to hold in place
+	@param xpos				Screen X position that target should end up at
+	@param pixelsPerXUnit	New horizontal scale
+ */
+void WaveformGroup::ZoomHorizontalAround(int64_t target, float xpos, float pixelsPerXUnit)
+{
+	if(pixelsPerXUnit <= 0)
+		return;
+
+	m_pixelsPerXUnit = pixelsPerXUnit;
+	m_xAxisOffset = target - PixelsToXAxisUnits(xpos - m_xpos);
+	ClearPersistence();
+}
+
 void WaveformGroup::AutofitHorizontal(float width)
 {
 	LogTrace("horizontal autoscale\n");
