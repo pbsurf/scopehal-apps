@@ -12,4 +12,10 @@
     <comment>ngscopeclient session archive</comment>
     <glob pattern="*.scopearchive"/>
   </mime-type>
+  <mime-type type="application/x-ngscopeclient-config">
+    <sub-class-of type="application/zip"/>
+    <generic-icon name="package-x-generic"/>
+    <comment>ngscopeclient session configuration</comment>
+    <glob pattern="*.scopeconfig"/>
+  </mime-type>
 </mime-info>

@@ -95,7 +95,8 @@ static void print_help(FILE* stream)
 		"  If you wish to resume a prior session, pass the path to a session file\n"
 		"  saved from the graphical interface as the sole non-option argument.\n"
 		"  The file name _must_ end in '.scopesession' (or '.scopearchive' for a\n"
-		"  session saved as a single archive file).\n"
+		"  session saved as a single archive file, '.scopeconfig' for one saved\n"
+		"  without waveform data).\n"
 		"\n"
 		"  Normally you will be asked whether to reconnect to the instruments or\n"
 		"  load the saved data for offline analysis. To skip the question, use:\n"
@@ -203,8 +204,8 @@ int main(int argc, char* argv[])
 			return 1;
 		}
 
-		//If it ends in .scopesession or .scopearchive assume it's a session file
-		if(IsSessionFilePath(s) || IsSessionArchivePath(s))
+		//If it ends in .scopesession, .scopearchive or .scopeconfig assume it's a session file
+		if(IsSessionFilePath(s) || IsSessionArchivePath(s) || IsSessionConfigPath(s))
 			sessionToOpen = s;
 
 		//Assume it's an instrument

@@ -2715,9 +2715,10 @@ void MainWindow::OnOpenFile(bool online)
 		".",
 		"Open Session",
 		{
-			{"All sessions (*.scopesession *.scopearchive)", "*.scopesession;*.scopearchive"},
+			{"All sessions (*.scopesession *.scopearchive *.scopeconfig)", "*.scopesession;*.scopearchive;*.scopeconfig"},
 			{"Session files (*.scopesession)", "*.scopesession"},
-			{"Session archives (*.scopearchive)", "*.scopearchive"}
+			{"Session archives (*.scopearchive)", "*.scopearchive"},
+			{"Session configurations (*.scopeconfig)", "*.scopeconfig"}
 		},
 		false);
 }
@@ -2725,8 +2726,9 @@ void MainWindow::OnOpenFile(bool online)
 /**
 	@brief Handler for file | save as menu. Spawns the browser dialog
 
-	The format is chosen by the extension of the file name: a session file with a data directory next to it, or a
-	single archive file. Choosing a file type in the dialog adds its extension to a name without one.
+	The format is chosen by the extension of the file name: a session file with a data directory next to it, a
+	single archive file, or an archive with only the configuration and layout (no waveforms). Choosing a file type in
+	the dialog adds its extension to a name without one.
  */
 void MainWindow::OnSaveAs()
 {
@@ -2737,7 +2739,8 @@ void MainWindow::OnSaveAs()
 		"Save Session",
 		{
 			{"Session files (*.scopesession)", "*.scopesession"},
-			{"Session archives (*.scopearchive)", "*.scopearchive"}
+			{"Session archives (*.scopearchive)", "*.scopearchive"},
+			{"Session configurations (*.scopeconfig)", "*.scopeconfig"}
 		},
 		true);
 }
@@ -2782,7 +2785,7 @@ void MainWindow::DoOpenFile(const string& sessionPath, bool online)
 	//Archive, or session file with a data directory next to it?
 	shared_ptr<SessionReader> reader;
 	string datadir;
-	if(IsSessionArchivePath(sessionPath))
+	if(IsSessionArchivePath(sessionPath) || IsSessionConfigPath(sessionPath))
 	{
 		LogDebug("Opening session archive \"%s\"\n", sessionPath.c_str());
 		auto zreader = make_shared<ZipSessionReader>(sessionPath);
@@ -3417,12 +3420,14 @@ void MainWindow::DoSaveFile(string sessionPath)
 	//Saving the file conflicts with all other waveform data operations
 	lock_guard<shared_mutex> lock(m_session.GetWaveformDataMutex());
 
-	//Save as a single archive, or a session file with a data directory next to it
+	//Save as a single archive, or a session file with a data directory next to it.
+	//A configuration is an archive without waveform data.
 	unique_ptr<SessionWriter> writer;
 	string datadir;
-	if(IsSessionArchivePath(sessionPath))
+	bool saveWaveforms = !IsSessionConfigPath(sessionPath);
+	if(IsSessionArchivePath(sessionPath) || !saveWaveforms)
 	{
-		LogDebug("Saving session archive \"%s\"\n", sessionPath.c_str());
+		LogDebug("Saving session archive \"%s\"%s\n", sessionPath.c_str(), saveWaveforms ? "" : " (configuration only)");
 		auto zwriter = make_unique<ZipSessionWriter>(sessionPath);
 		if(!zwriter->IsOpen())
 		{
@@ -3449,7 +3454,7 @@ void MainWindow::DoSaveFile(string sessionPath)
 
 	//Serialize the session, along with the lab notes
 	YAML::Node node{};
-	if(!SaveSessionToYaml(node, *writer) || !SaveLabNotes(*writer))
+	if(!SaveSessionToYaml(node, *writer, saveWaveforms) || !SaveLabNotes(*writer))
 	{
 		ShowErrorPopup("Failed to save session", writer->GetError());
 		return;
@@ -3496,12 +3501,14 @@ void MainWindow::LoadLabNotes(SessionReader& reader)
 /**
 	@brief Serialize the current session to a YAML::Node
 
-	@param node		Node for the main .scopesession
-	@param writer	Writer for the other files making up the session
+	@param node				Node for the main .scopesession
+	@param writer			Writer for the other files making up the session
+	@param saveWaveforms	True to save waveform data (history and filters that store their waveforms), false to
+							save only the configuration and layout
 
 	@return			True if successful, false on error (see writer.GetError())
  */
-bool MainWindow::SaveSessionToYaml(YAML::Node& node, SessionWriter& writer)
+bool MainWindow::SaveSessionToYaml(YAML::Node& node, SessionWriter& writer, bool saveWaveforms)
 {
 	/*
 		version unspecified (treated as version 0): original string concatenation based glscopeclient impl
@@ -3520,8 +3527,8 @@ bool MainWindow::SaveSessionToYaml(YAML::Node& node, SessionWriter& writer)
 	//Save UI widgets
 	node["ui_config"] = SerializeUIConfiguration();
 
-	//Waveform data
-	if(!m_session.SerializeWaveforms(writer))
+	//Waveform data. Without it, loading finds no waveform metadata and starts with an empty history
+	if(saveWaveforms && !m_session.SerializeWaveforms(writer))
 		return false;
 
 	//Save ImGui configuration

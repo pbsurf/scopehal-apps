@@ -141,7 +141,7 @@ protected:
 };
 
 /**
-	@brief Saves a session as a single .scopearchive (zip) file
+	@brief Saves a session as a single .scopearchive (or .scopeconfig) zip file
 
 	The archive contains the same files as a directory session: NAME.scopesession and NAME_data/..., so it can be
 	unzipped and opened as a normal session. Waveform data is stored uncompressed so it can be read in place when
@@ -234,7 +234,7 @@ protected:
 };
 
 /**
-	@brief Reads a session saved as a .scopearchive (zip) file
+	@brief Reads a session saved as a .scopearchive (or .scopeconfig) zip file
 
 	Uncompressed entries are read straight from the archive file (memory mapped on POSIX), without going through miniz.
  */
@@ -291,6 +291,9 @@ protected:
 
 ///@brief Checks if a path names a session archive (.scopearchive) rather than a .scopesession file
 bool IsSessionArchivePath(const std::string& path);
+
+///@brief Checks if a path names a session configuration (.scopeconfig): an archive without waveform data
+bool IsSessionConfigPath(const std::string& path);
 
 ///@brief Checks if a path names a .scopesession file
 bool IsSessionFilePath(const std::string& path);

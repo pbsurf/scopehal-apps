@@ -51,6 +51,7 @@ using namespace std;
 
 static const char* const g_sessionExtension = ".scopesession";
 static const char* const g_archiveExtension = ".scopearchive";
+static const char* const g_configExtension = ".scopeconfig";
 
 static bool EndsWith(const string& str, const string& suffix)
 {
@@ -74,6 +75,11 @@ static bool EndsWithNoCase(const string& str, const string& suffix)
 bool IsSessionArchivePath(const string& path)
 {
 	return EndsWithNoCase(path, g_archiveExtension);
+}
+
+bool IsSessionConfigPath(const string& path)
+{
+	return EndsWithNoCase(path, g_configExtension);
 }
 
 bool IsSessionFilePath(const string& path)

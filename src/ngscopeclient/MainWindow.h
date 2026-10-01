@@ -545,7 +545,7 @@ public:
 protected:
 	void OnSaveAs();
 	void DoSaveFile(std::string sessionPath);
-	bool SaveSessionToYaml(YAML::Node& node, SessionWriter& writer);
+	bool SaveSessionToYaml(YAML::Node& node, SessionWriter& writer, bool saveWaveforms);
 	bool SaveLabNotes(SessionWriter& writer);
 	void LoadLabNotes(SessionReader& reader);
 	bool SetupDataDirectory(const std::string& dataDir);
