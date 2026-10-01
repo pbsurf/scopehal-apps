@@ -48,8 +48,7 @@ public:
 		const std::string& initialPath,
 		const std::string& title,
 		const std::string& id,
-		const std::string& filterName,
-		const std::string& filterMask,
+		const std::vector<FileBrowserFilter>& filters,
 		bool saveDialog
 		);
 	virtual ~IGFDFileBrowser();
@@ -72,6 +71,12 @@ protected:
 
 	///@brief Bookmark paths
 	std::map<std::string, std::string> m_bookmarks;
+
+	///@brief File types offered
+	std::vector<FileBrowserFilter> m_filters;
+
+	///@brief True if this is a save dialog
+	bool m_saveDialog;
 
 	///@brief Dialog ID
 	std::string m_id;

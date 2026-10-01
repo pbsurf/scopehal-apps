@@ -355,6 +355,7 @@ if(MSVC)
 else()
 	add_subdirectory("${PROJECT_SOURCE_DIR}/lib/log")
 endif()
+add_subdirectory("${PROJECT_SOURCE_DIR}/src/miniz")
 add_subdirectory("${PROJECT_SOURCE_DIR}/src/ngscopeclient")
 add_subdirectory("${PROJECT_SOURCE_DIR}/src/nativefiledialog-extended")
 

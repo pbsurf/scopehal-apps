@@ -45,25 +45,35 @@ using namespace std;
 NFDFileBrowser::NFDFileBrowser(
 	const string& initialPath,
 	const string& title,
-	const string& filterName,
-	const string& filterMask,
+	const vector<FileBrowserFilter>& filters,
 	bool saveDialog,
 	MainWindow* parent
 	)
 	: m_parent(parent)
 	, m_initialPath(initialPath)
 	, m_title(title)
-	, m_filterName(filterName)
-	, m_filterMask(filterMask)
 	, m_saveDialog(saveDialog)
 	, m_cachedResultValid(false)
 {
-	//Trim off filter name
-	size_t iparen = m_filterName.find('(');
-	if(iparen != string::npos)
-		m_filterName.resize(iparen);
+	for(auto& f : filters)
+	{
+		//Trim off filter name
+		string name = f.name;
+		size_t iparen = name.find('(');
+		if(iparen != string::npos)
+			name.resize(iparen);
+		m_filterNames.push_back(name);
 
-	m_filterMask = filterMask.substr(2);
+		//Extensions without the "*.", comma separated
+		string spec;
+		for(auto& pattern : SplitFileBrowserMask(f.mask))
+		{
+			if(!spec.empty())
+				spec += ",";
+			spec += pattern.substr(2);
+		}
+		m_filterSpecs.push_back(spec);
+	}
 
 	m_future = async(launch::async, [this]{return ThreadProc(); } );
 }
@@ -127,7 +137,9 @@ optional<string> NFDFileBrowser::ThreadProc()
 	}
 
 	nfdchar_t* outPath = nullptr;
-	nfdu8filteritem_t filterItem = { m_filterName.c_str(), m_filterMask.c_str() };
+	vector<nfdu8filteritem_t> filterItems;
+	for(size_t i=0; i<m_filterNames.size(); i++)
+		filterItems.push_back({ m_filterNames[i].c_str(), m_filterSpecs[i].c_str() });
 	nfdresult_t result;
 	if(m_saveDialog)
 	{
@@ -135,8 +147,8 @@ optional<string> NFDFileBrowser::ThreadProc()
 		nfdsavedialogu8args_t args;
 		memset(&args, 0, sizeof(args));
 
-		args.filterList = &filterItem;
-		args.filterCount = 1;
+		args.filterList = filterItems.data();
+		args.filterCount = filterItems.size();
 		args.defaultPath = nullptr;
 		if(!NFD_GetNativeWindowFromSDLWindow(m_parent->GetWindow(), &args.parentWindow))
 			LogError("failed to get window handle\n");
@@ -149,8 +161,8 @@ optional<string> NFDFileBrowser::ThreadProc()
 		nfdopendialogu8args_t args;
 		memset(&args, 0, sizeof(args));
 
-		args.filterList = &filterItem;
-		args.filterCount = 1;
+		args.filterList = filterItems.data();
+		args.filterCount = filterItems.size();
 		args.defaultPath = nullptr;
 		if(!NFD_GetNativeWindowFromSDLWindow(m_parent->GetWindow(), &args.parentWindow))
 			LogError("failed to get window handle\n");

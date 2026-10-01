@@ -35,6 +35,7 @@
 #include "ngscopeclient.h"
 #include "ngscopeclient-version.h"
 #include "Session.h"
+#include "SessionStorage.h"
 #include "../scopeprotocols/ExportFilter.h"
 #include "../scopeprotocols/HTTPExportFilter.h"
 #include "MainWindow.h"
@@ -367,12 +368,12 @@ void Session::OnMarkerChanged()
 	@brief Perform partial loading and check for potentially dangerous configurations
 
 	@param node		Root YAML node of the file
-	@param dataDir	Path to the _data directory associated with the session
+	@param reader	Reader for the files associated with the session
 	@param online	True if we should reconnect to instruments
 
 	@return			True if successful, false on error
  */
-bool Session::PreLoadFromYaml(const YAML::Node& node, const std::string& /*dataDir*/, bool online)
+bool Session::PreLoadFromYaml(const YAML::Node& node, SessionReader& /*reader*/, bool online)
 {
 	LogTrace("Preloading saved session from YAML node\n");
 	LogIndenter li;
@@ -400,12 +401,12 @@ bool Session::PreLoadFromYaml(const YAML::Node& node, const std::string& /*dataD
 	@brief Deserialize a YAML::Node (and associated data directory) to the current session
 
 	@param node		Root YAML node of the file
-	@param dataDir	Path to the _data directory associated with the session
+	@param reader	Reader for the files associated with the session
 	@param online	True if we should reconnect to instruments
 
 	@return			True if successful, false on error
  */
-bool Session::LoadFromYaml(const YAML::Node& node, const string& dataDir, bool online)
+bool Session::LoadFromYaml(const YAML::Node& node, SessionReader& reader, bool online)
 {
 	LogTrace("Loading saved session from YAML node\n");
 	LogIndenter li;
@@ -420,7 +421,7 @@ bool Session::LoadFromYaml(const YAML::Node& node, const string& dataDir, bool o
 		return false;
 	if(!LoadTriggerGroups(node["triggergroups"]))
 		return false;
-	if(!LoadWaveformData(m_fileLoadVersion, dataDir))
+	if(!LoadWaveformData(m_fileLoadVersion, reader))
 		return false;
 
 	//Markers
@@ -451,7 +452,7 @@ bool Session::LoadFromYaml(const YAML::Node& node, const string& dataDir, bool o
 }
 
 //TODO: this should run in a background thread or something to keep the UI responsive
-bool Session::LoadWaveformData(int version, const string& dataDir)
+bool Session::LoadWaveformData(int version, SessionReader& reader)
 {
 	LogTrace("Loading waveform data\n");
 	LogIndenter li;
@@ -459,16 +460,13 @@ bool Session::LoadWaveformData(int version, const string& dataDir)
 
 	//Load filter waveforms *before* scope data
 	//(we don't want any filters to be updated from nonexistent inputs and change state prior to getting output loaded)
-	string fname = dataDir + "/filter_metadata.yml";
-	FILE* fp = fopen(fname.c_str(), "r");
-	if(fp)
+	string text;
+	if(reader.ReadTextFile("filter_metadata.yml", text))
 	{
-		fclose(fp);
-
-		auto docs = YAML::LoadAllFromFile(fname);
+		auto docs = YAML::LoadAll(text);
 		if(docs.size())
 		{
-			if(!LoadWaveformDataForFilters(version, docs[0], dataDir))
+			if(!LoadWaveformDataForFilters(version, docs[0], reader))
 				return false;
 		}
 	}
@@ -483,20 +481,16 @@ bool Session::LoadWaveformData(int version, const string& dataDir)
 		auto scope = it.first;
 		int id = m_idtable[(Instrument*)scope.get()];
 
-		char tmp[512] = {0};
-		snprintf(tmp, sizeof(tmp), "%s/scope_%d_metadata.yml", dataDir.c_str(), id);
-
 		//No metadata file (e.g. session file copied without its data directory)? No waveforms at all, skip loading.
-		//Check first, since YAML::LoadAllFromFile() throws if the file doesn't exist.
-		if(!filesystem::exists(tmp))
+		if(!reader.ReadTextFile(string("scope_") + to_string(id) + "_metadata.yml", text))
 			return true;
-		auto docs = YAML::LoadAllFromFile(tmp);
+		auto docs = YAML::LoadAll(text);
 
 		//Nothing there? No waveforms at all, skip loading
 		if(docs.empty())
 			return true;
 
-		if(!LoadWaveformDataForScope(version, docs[0], scope, dataDir))
+		if(!LoadWaveformDataForScope(version, docs[0], scope, reader))
 		{
 			LogTrace("Waveform data loading failed\n");
 			return false;
@@ -590,7 +584,7 @@ bool Session::ConvertLegacyUniformWaveforms()
 bool Session::LoadWaveformDataForFilters(
 		int /*version*/,		//ignored for now, always 2 since older formats don't support filter waveforms
 		const YAML::Node& node,
-		const string& dataDir)
+		SessionReader& reader)
 {
 	//Block filter graph from running while loading
 	lock_guard<shared_mutex> lock(m_waveformDataMutex);
@@ -601,7 +595,7 @@ bool Session::LoadWaveformDataForFilters(
 	if(!waveforms)
 		return true;
 
-	string filtdir = dataDir + "/filter_waveforms";
+	string filtdir = "filter_waveforms";
 
 	for(auto it : waveforms)
 	{
@@ -660,7 +654,7 @@ bool Session::LoadWaveformDataForFilters(
 
 			//Actually load the waveform
 			string fname = datdir + "/stream" + to_string(i) + ".bin";
-			DoLoadWaveformDataForStream(cap, fmt, fname);
+			DoLoadWaveformDataForStream(cap, fmt, reader, fname);
 		}
 	}
 
@@ -674,7 +668,7 @@ bool Session::LoadWaveformDataForScope(
 	int version,
 	const YAML::Node& node,
 	shared_ptr<Oscilloscope> scope,
-	const std::string& dataDir)
+	SessionReader& reader)
 {
 	LogTrace("Loading waveform data for scope \"%s\"\n", scope->m_nickname.c_str());
 	LogIndenter li;
@@ -875,16 +869,14 @@ bool Session::LoadWaveformDataForScope(
 
 			if(nstream == 0)
 			{
-				snprintf(tmp, sizeof(tmp), "%s/scope_%d_waveforms/waveform_%d/channel_%d.bin",
-					dataDir.c_str(),
+				snprintf(tmp, sizeof(tmp), "scope_%d_waveforms/waveform_%d/channel_%d.bin",
 					scope_id,
 					waveform_id,
 					nchan);
 			}
 			else
 			{
-				snprintf(tmp, sizeof(tmp), "%s/scope_%d_waveforms/waveform_%d/channel_%d_stream%d.bin",
-					dataDir.c_str(),
+				snprintf(tmp, sizeof(tmp), "scope_%d_waveforms/waveform_%d/channel_%d_stream%d.bin",
 					scope_id,
 					waveform_id,
 					nchan,
@@ -909,7 +901,7 @@ bool Session::LoadWaveformDataForScope(
 	for(size_t i=0; i<waveformsToLoad.size(); i++)
 	{
 		auto info = waveformsToLoad[i];
-		DoLoadWaveformDataForStream(info.wfm, info.format, info.fname);
+		DoLoadWaveformDataForStream(info.wfm, info.format, reader, info.fname);
 	}
 
 	//Copy it all to the GPU in one go
@@ -931,7 +923,7 @@ bool Session::LoadWaveformDataForScope(
 	return true;
 }
 
-void Session::DoLoadWaveformDataForStream(WaveformBase* cap, const string& format, const string& fname)
+void Session::DoLoadWaveformDataForStream(WaveformBase* cap, const string& format, SessionReader& reader, const string& path)
 {
 	auto sbase = dynamic_cast<SparseWaveformBase*>(cap);
 	auto sacap = dynamic_cast<SparseAnalogWaveform*>(cap);
@@ -945,50 +937,15 @@ void Session::DoLoadWaveformDataForStream(WaveformBase* cap, const string& forma
 
 	cap->PrepareForCpuAccess();
 
-	//Load samples into memory
-	unsigned char* buf = NULL;
-
-	//Windows: use generic file reads for now
-	#ifdef _WIN32
-		FILE* fp = fopen(fname.c_str(), "rb");
-		if(!fp)
-		{
-			LogError("couldn't open %s\n", fname.c_str());
-			return;
-		}
-
-		//Read the whole file into a buffer a megabyte at a time
-		fseek(fp, 0, SEEK_END);
-		long len = ftell(fp);
-		fseek(fp, 0, SEEK_SET);
-		buf = new unsigned char[len];
-		long len_remaining = len;
-		long blocksize = 1024*1024;
-		long read_offset = 0;
-		while(len_remaining > 0)
-		{
-			if(blocksize > len_remaining)
-				blocksize = len_remaining;
-
-			//Most time is spent on the fread's when using this path
-			fread(buf + read_offset, 1, blocksize, fp);
-
-			len_remaining -= blocksize;
-			read_offset += blocksize;
-		}
-		fclose(fp);
-
-	//On POSIX, just memory map the file
-	#else
-		int fd = open(fname.c_str(), O_RDONLY);
-		if(fd < 0)
-		{
-			LogError("couldn't open %s\n", fname.c_str());
-			return;
-		}
-		size_t len = lseek(fd, 0, SEEK_END);
-		buf = (unsigned char*)mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, 0);
-	#endif
+	//Load samples into memory (memory mapped where possible)
+	auto file = reader.ReadFile(path);
+	if(!file)
+	{
+		LogError("couldn't open %s\n", reader.Describe(path).c_str());
+		return;
+	}
+	const uint8_t* buf = file->data();
+	size_t len = file->size();
 
 	//Sparse interleaved
 	if(format == "sparsev1")
@@ -1010,7 +967,7 @@ void Session::DoLoadWaveformDataForStream(WaveformBase* cap, const string& forma
 			size_t offset = j*samplesize;
 
 			//Read start time and duration
-			int64_t* stime = reinterpret_cast<int64_t*>(buf+offset);
+			const int64_t* stime = reinterpret_cast<const int64_t*>(buf+offset);
 			offset += 2*sizeof(int64_t);
 
 			//Read sample data
@@ -1019,7 +976,7 @@ void Session::DoLoadWaveformDataForStream(WaveformBase* cap, const string& forma
 				//The file format assumes "float" is IEEE754 32-bit float.
 				//If your platform doesn't do that, good luck.
 				//cppcheck-suppress invalidPointerCast
-				sacap->m_samples[j] = *reinterpret_cast<float*>(buf+offset);
+				sacap->m_samples[j] = *reinterpret_cast<const float*>(buf+offset);
 
 				memcpy(&sacap->m_offsets[j], &stime[0], sizeof(int64_t));
 				memcpy(&sacap->m_durations[j], &stime[1], sizeof(int64_t));
@@ -1027,7 +984,7 @@ void Session::DoLoadWaveformDataForStream(WaveformBase* cap, const string& forma
 
 			else if(sdcap)
 			{
-				sdcap->m_samples[j] = *reinterpret_cast<bool*>(buf+offset);
+				sdcap->m_samples[j] = *reinterpret_cast<const bool*>(buf+offset);
 				sdcap->m_offsets[j] = stime[0];
 				sdcap->m_durations[j] = stime[1];
 			}
@@ -1035,7 +992,7 @@ void Session::DoLoadWaveformDataForStream(WaveformBase* cap, const string& forma
 			//CAN capture
 			else if(ccap)
 			{
-				uint32_t* p = reinterpret_cast<uint32_t*>(buf+offset);
+				const uint32_t* p = reinterpret_cast<const uint32_t*>(buf+offset);
 
 				ccap->m_samples[j] = CANSymbol((CANSymbol::stype)p[1], p[0]);
 				ccap->m_offsets[j] = stime[0];
@@ -1110,13 +1067,6 @@ void Session::DoLoadWaveformDataForStream(WaveformBase* cap, const string& forma
 	}
 
 	cap->MarkModifiedFromCpu();
-
-	#ifdef _WIN32
-		delete[] buf;
-	#else
-		munmap(buf, len);
-		::close(fd);
-	#endif
 }
 
 /**
@@ -2449,7 +2399,7 @@ YAML::Node Session::SerializeMarkers()
 	return node;
 }
 
-bool Session::SerializeWaveforms(const string& dataDir)
+bool Session::SerializeWaveforms(SessionWriter& writer)
 {
 	//Metadata nodes for each scope
 	std::map<std::shared_ptr<Oscilloscope>, YAML::Node> metadataNodes;
@@ -2469,21 +2419,9 @@ bool Session::SerializeWaveforms(const string& dataDir)
 			auto scope = it.first;
 			auto& hist = it.second;
 
-			//Make the directory for the scope if needed
-			string scopedir = dataDir + "/scope_" + to_string(m_idtable[(Instrument*)scope.get()]) + "_waveforms";
-			#ifdef _WIN32
-				_mkdir(scopedir.c_str());
-			#else
-				mkdir(scopedir.c_str(), 0755);
-			#endif
-
-			//Make directory for this waveform
+			//Directory for this waveform (the writer creates directories as needed)
+			string scopedir = "scope_" + to_string(m_idtable[(Instrument*)scope.get()]) + "_waveforms";
 			string datdir = scopedir + "/waveform_" + to_string(numwfm);
-			#ifdef _WIN32
-				mkdir(datdir.c_str());
-			#else
-				mkdir(datdir.c_str(), 0755);
-			#endif
 
 			//Format metadata for this waveform
 			YAML::Node mnode;
@@ -2533,12 +2471,12 @@ bool Session::SerializeWaveforms(const string& dataDir)
 							chnode["format"] = "sparsev2";
 							if(ibm)
 								chnode["datatype"] = "8b10b";
-							SerializeSparseWaveformV2(sparse, datapath);
+							SerializeSparseWaveformV2(sparse, writer, datapath);
 						}
 						else
 						{
 							chnode["format"] = "sparsev1";
-							SerializeSparseWaveform(sparse, datapath);
+							SerializeSparseWaveform(sparse, writer, datapath);
 
 							//Save type if it's a protocol waveform
 							//so if we do an offline load, we know what type of waveform to make
@@ -2561,7 +2499,7 @@ bool Session::SerializeWaveforms(const string& dataDir)
 							chnode["datatype"] = "digital";
 						else if(dynamic_cast<UniformAnalogWaveform*>(uniform) != nullptr)
 							chnode["datatype"] = "analog";
-						SerializeUniformWaveform(uniform, datapath);
+						SerializeUniformWaveform(uniform, writer, datapath);
 					}
 
 					mnode["channels"][string("ch") + to_string(i) + "s" + to_string(j)] = chnode;
@@ -2574,26 +2512,20 @@ bool Session::SerializeWaveforms(const string& dataDir)
 		numwfm ++;
 	}
 
-	//Write metadata files (by this point, data directories should have been created)
+	//Write metadata files
 	for(auto it : m_oscilloscopes)
 	{
 		auto scope = it.first;
-		string fname = dataDir + "/scope_" + to_string(m_idtable[(Instrument*)scope.get()]) + "_metadata.yml";
+		string fname = "scope_" + to_string(m_idtable[(Instrument*)scope.get()]) + "_metadata.yml";
 
-		ofstream outfs(fname);
-		if(!outfs)
+		YAML::Emitter out;
+		out << metadataNodes[scope];
+		if(!writer.WriteTextFile(fname, out.c_str()))
 			return false;
-		outfs << metadataNodes[scope];
-		outfs.close();
 	}
 
-	//Make directory for filters
-	string filtdir = dataDir + "/filter_waveforms";
-	#ifdef _WIN32
-		mkdir(filtdir.c_str());
-	#else
-		mkdir(filtdir.c_str(), 0755);
-	#endif
+	//Directory for filters
+	string filtdir = "filter_waveforms";
 
 	//Find filters that need to be serialized
 	YAML::Node filterNode;
@@ -2604,14 +2536,9 @@ bool Session::SerializeWaveforms(const string& dataDir)
 		if(!f->ShouldPersistWaveform())
 			continue;
 
-		//Make directory for this filter
+		//Directory for this filter
 		auto nfilter = m_idtable.emplace(f);
 		string datdir = filtdir + "/filter_" + to_string(nfilter);
-		#ifdef _WIN32
-			mkdir(datdir.c_str());
-		#else
-			mkdir(datdir.c_str(), 0755);
-		#endif
 
 		//There's no history timestamp so use timestamp of the first stream's waveform
 		//If no first stream what do we do?
@@ -2661,18 +2588,18 @@ bool Session::SerializeWaveforms(const string& dataDir)
 					if(ibm)
 						chnode["datatype"] = "8b10b";
 
-					SerializeSparseWaveformV2(sparse, datapath);
+					SerializeSparseWaveformV2(sparse, writer, datapath);
 				}
 				else
 				{
 					chnode["format"] = "sparsev1";
-					SerializeSparseWaveform(sparse, datapath);
+					SerializeSparseWaveform(sparse, writer, datapath);
 				}
 			}
 			else
 			{
 				chnode["format"] = "densev1";
-				SerializeUniformWaveform(uniform, datapath);
+				SerializeUniformWaveform(uniform, writer, datapath);
 			}
 
 			mnode["streams"][string("s") + to_string(j)] = chnode;
@@ -2681,14 +2608,9 @@ bool Session::SerializeWaveforms(const string& dataDir)
 		filterNode["waveforms"][string("filt") + to_string(nfilter)] = mnode;
 	}
 
-	string fname = dataDir + "/filter_metadata.yml";
-	ofstream outfs(fname);
-	if(!outfs)
-		return false;
-	outfs << filterNode;
-	outfs.close();
-
-	return true;
+	YAML::Emitter out;
+	out << filterNode;
+	return writer.WriteTextFile("filter_metadata.yml", out.c_str());
 }
 
 /**
@@ -2704,45 +2626,27 @@ bool Session::SerializeWaveforms(const string& dataDir)
 		for protocol
 			T samples[]
  */
-bool Session::SerializeSparseWaveformV2(SparseWaveformBase* wfm, const string& path)
+bool Session::SerializeSparseWaveformV2(SparseWaveformBase* wfm, SessionWriter& writer, const string& path)
 {
-	FILE* fp = fopen(path.c_str(), "wb");
-	if(!fp)
-		return false;
-
 	wfm->PrepareForCpuAccess();
 
 	auto ichan = dynamic_cast<IBM8b10bWaveform*>(wfm);
 	size_t len = wfm->size();
 
-	//Serialize offsets and durations
-	if(len != fwrite(&wfm->m_offsets[0], sizeof(int64_t), len, fp))
-	{
-		LogError("write offsets failed\n");
-		fclose(fp);
-		return false;
-	}
-	if(len != fwrite(&wfm->m_durations[0], sizeof(int64_t), len, fp))
-	{
-		LogError("write durations failed\n");
-		fclose(fp);
-		return false;
-	}
-
-	//Serialize sample data
+	//Offsets and durations, then sample data
+	vector<SessionWriter::Chunk> chunks;
+	chunks.push_back({wfm->m_offsets.GetCpuPointer(), len * sizeof(int64_t)});
+	chunks.push_back({wfm->m_durations.GetCpuPointer(), len * sizeof(int64_t)});
 	if(ichan)
-	{
-		if(len != fwrite(&ichan->m_samples[0], sizeof(IBM8b10bSymbol), len, fp))
-		{
-			LogError("write samples failed\n");
-			fclose(fp);
-			return false;
-		}
-	}
+		chunks.push_back({ichan->m_samples.GetCpuPointer(), len * sizeof(IBM8b10bSymbol)});
 	else
 		LogError("trying to serialize unrecognized data type\n");
 
-	fclose(fp);
+	if(!writer.WriteFile(path, chunks, false))
+	{
+		LogError("%s\n", writer.GetError().c_str());
+		return false;
+	}
 	return true;
 }
 
@@ -2757,12 +2661,8 @@ bool Session::SerializeSparseWaveformV2(SparseWaveformBase* wfm, const string& p
 		for digital
 			bool voltage
  */
-bool Session::SerializeSparseWaveform(SparseWaveformBase* wfm, const string& path)
+bool Session::SerializeSparseWaveform(SparseWaveformBase* wfm, SessionWriter& writer, const string& path)
 {
-	FILE* fp = fopen(path.c_str(), "wb");
-	if(!fp)
-		return false;
-
 	wfm->PrepareForCpuAccess();
 	auto achan = dynamic_cast<SparseAnalogWaveform*>(wfm);
 	auto dchan = dynamic_cast<SparseDigitalWaveform*>(wfm);
@@ -2770,7 +2670,6 @@ bool Session::SerializeSparseWaveform(SparseWaveformBase* wfm, const string& pat
 	size_t len = wfm->size();
 
 	//Analog channels
-	const size_t samples_per_block = 10000;
 	if(achan)
 	{
 		#pragma pack(push, 1)
@@ -2794,15 +2693,10 @@ bool Session::SerializeSparseWaveform(SparseWaveformBase* wfm, const string& pat
 			samples.push_back(asample_t(achan->m_offsets[i], achan->m_durations[i], achan->m_samples[i]));
 
 		//Write it
-		for(size_t i=0; i<len; i+= samples_per_block)
+		if(!writer.WriteFile(path, samples.data(), len * sizeof(asample_t)))
 		{
-			size_t blocklen = min(len-i, samples_per_block);
-			if(blocklen != fwrite(&samples[i], sizeof(asample_t), blocklen, fp))
-			{
-				LogError("file write error\n");
-				fclose(fp);
-				return false;
-			}
+			LogError("%s\n", writer.GetError().c_str());
+			return false;
 		}
 	}
 	else if(dchan)
@@ -2828,14 +2722,10 @@ bool Session::SerializeSparseWaveform(SparseWaveformBase* wfm, const string& pat
 			samples.push_back(dsample_t(dchan->m_offsets[i], dchan->m_durations[i], dchan->m_samples[i]));
 
 		//Write it
-		for(size_t i=0; i<len; i+= samples_per_block)
+		if(!writer.WriteFile(path, samples.data(), len * sizeof(dsample_t)))
 		{
-			size_t blocklen = min(len-i, samples_per_block);
-			if(blocklen != fwrite(&samples[i], sizeof(dsample_t), blocklen, fp))
-			{
-				LogError("file write error\n");
-				fclose(fp);
-			}
+			LogError("%s\n", writer.GetError().c_str());
+			return false;
 		}
 	}
 	else if(cchan)
@@ -2862,15 +2752,10 @@ bool Session::SerializeSparseWaveform(SparseWaveformBase* wfm, const string& pat
 			samples.push_back(csample_t(cchan->m_offsets[i], cchan->m_durations[i], cchan->m_samples[i]));
 
 		//Write it
-		for(size_t i=0; i<len; i+= samples_per_block)
+		if(!writer.WriteFile(path, samples.data(), len * sizeof(csample_t)))
 		{
-			size_t blocklen = min(len-i, samples_per_block);
-			if(blocklen != fwrite(&samples[i], sizeof(csample_t), blocklen, fp))
-			{
-				LogError("file write error\n");
-				fclose(fp);
-				return false;
-			}
+			LogError("%s\n", writer.GetError().c_str());
+			return false;
 		}
 	}
 	else
@@ -2889,11 +2774,9 @@ bool Session::SerializeSparseWaveform(SparseWaveformBase* wfm, const string& pat
 		//TODO: support other waveform types (buses, eyes, etc)
 		LogError("unrecognized sample type (trying to serialize sparse waveform of type %s)\n",
 			stype.c_str());
-		fclose(fp);
 		return false;
 	}
 
-	fclose(fp);
 	return true;
 }
 
@@ -2907,12 +2790,8 @@ bool Session::SerializeSparseWaveform(SparseWaveformBase* wfm, const string& pat
 
 	Durations are implied {1....1} and offsets are implied {0...n-1}.
  */
-bool Session::SerializeUniformWaveform(UniformWaveformBase* wfm, const string& path)
+bool Session::SerializeUniformWaveform(UniformWaveformBase* wfm, SessionWriter& writer, const string& path)
 {
-	FILE* fp = fopen(path.c_str(), "wb");
-	if(!fp)
-		return false;
-
 	wfm->PrepareForCpuAccess();
 	auto achan = dynamic_cast<UniformAnalogWaveform*>(wfm);
 	auto dchan = dynamic_cast<UniformDigitalWaveform*>(wfm);
@@ -2920,52 +2799,40 @@ bool Session::SerializeUniformWaveform(UniformWaveformBase* wfm, const string& p
 	auto b64 = dynamic_cast<UniformDigitalBusWaveform64*>(wfm);
 	size_t len = wfm->size();
 
-	//Analog channels
+	const void* data;
+	size_t samplesize;
 	if(achan)
 	{
-		if(len != fwrite(achan->m_samples.GetCpuPointer(), sizeof(float), len, fp))
-		{
-			LogError("file write error\n");
-			fclose(fp);
-			return false;
-		}
+		data = achan->m_samples.GetCpuPointer();
+		samplesize = sizeof(float);
 	}
 	else if(dchan)
 	{
-		if(len != fwrite(dchan->m_samples.GetCpuPointer(), sizeof(bool), len, fp))
-		{
-			LogError("file write error\n");
-			fclose(fp);
-			return false;
-		}
+		data = dchan->m_samples.GetCpuPointer();
+		samplesize = sizeof(bool);
 	}
 	else if(b32)
 	{
-		if(len != fwrite(b32->m_samples.GetCpuPointer(), sizeof(uint32_t), len, fp))
-		{
-			LogError("file write error\n");
-			fclose(fp);
-			return false;
-		}
+		data = b32->m_samples.GetCpuPointer();
+		samplesize = sizeof(uint32_t);
 	}
 	else if(b64)
 	{
-		if(len != fwrite(b64->m_samples.GetCpuPointer(), sizeof(uint64_t), len, fp))
-		{
-			LogError("file write error\n");
-			fclose(fp);
-			return false;
-		}
+		data = b64->m_samples.GetCpuPointer();
+		samplesize = sizeof(uint64_t);
 	}
 	else
 	{
 		//TODO: support other waveform types (buses, eyes, etc)
 		LogError("unrecognized sample type\n");
-		fclose(fp);
 		return false;
 	}
 
-	fclose(fp);
+	if(!writer.WriteFile(path, data, len * samplesize))
+	{
+		LogError("%s\n", writer.GetError().c_str());
+		return false;
+	}
 	return true;
 }
 

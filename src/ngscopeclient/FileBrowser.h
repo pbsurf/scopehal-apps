@@ -38,6 +38,18 @@
 class MainWindow;
 
 /**
+	@brief A file type the user can choose in a file browser
+ */
+struct FileBrowserFilter
+{
+	///@brief Description, e.g. "Session files (*.scopesession)"
+	std::string name;
+
+	///@brief Pattern, e.g. "*.scopesession". Separate multiple patterns with ';'
+	std::string mask;
+};
+
+/**
 	@brief Abstract base class for a dialog that displays a file picker window
  */
 class FileBrowser
@@ -76,5 +88,15 @@ std::shared_ptr<FileBrowser> MakeFileBrowser(
 	const std::string& filterName,
 	const std::string& filterMask,
 	bool saveDialog);
+
+std::shared_ptr<FileBrowser> MakeFileBrowser(
+	MainWindow* wnd,
+	const std::string& initialPath,
+	const std::string& title,
+	const std::vector<FileBrowserFilter>& filters,
+	bool saveDialog);
+
+///@brief Splits a FileBrowserFilter mask into patterns
+std::vector<std::string> SplitFileBrowserMask(const std::string& mask);
 
 #endif

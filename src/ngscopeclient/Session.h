@@ -42,6 +42,8 @@
 class MainWindow;
 class WaveformArea;
 class DisplayedChannel;
+class SessionReader;
+class SessionWriter;
 
 #include "../xptools/HzClock.h"
 #include "HistoryManager.h"
@@ -158,18 +160,18 @@ public:
 	void Clear();
 	void ClearBackgroundThreads();
 
-	bool PreLoadFromYaml(const YAML::Node& node, const std::string& dataDir, bool online);
-	bool LoadFromYaml(const YAML::Node& node, const std::string& dataDir, bool online);
+	bool PreLoadFromYaml(const YAML::Node& node, SessionReader& reader, bool online);
+	bool LoadFromYaml(const YAML::Node& node, SessionReader& reader, bool online);
 	YAML::Node SerializeInstrumentConfiguration();
 	YAML::Node SerializeMetadata();
 	YAML::Node SerializeTriggerGroups();
 	bool LoadTriggerGroups(const YAML::Node& node);
 	YAML::Node SerializeFilterConfiguration();
 	YAML::Node SerializeMarkers();
-	bool SerializeWaveforms(const std::string& dataDir);
-	bool SerializeSparseWaveform(SparseWaveformBase* wfm, const std::string& path);
-	bool SerializeSparseWaveformV2(SparseWaveformBase* wfm, const std::string& path);
-	bool SerializeUniformWaveform(UniformWaveformBase* wfm, const std::string& path);
+	bool SerializeWaveforms(SessionWriter& writer);
+	bool SerializeSparseWaveform(SparseWaveformBase* wfm, SessionWriter& writer, const std::string& path);
+	bool SerializeSparseWaveformV2(SparseWaveformBase* wfm, SessionWriter& writer, const std::string& path);
+	bool SerializeUniformWaveform(UniformWaveformBase* wfm, SessionWriter& writer, const std::string& path);
 
 	std::shared_ptr<PacketManager> AddPacketFilter(PacketDecoder* filter);
 	void RemovePacketFilter(PacketDecoder* filter);
@@ -450,17 +452,17 @@ protected:
 	bool PreLoadMisc(int version, const YAML::Node& node, bool online);
 	bool LoadFilters(int version, const YAML::Node& node);
 	bool LoadInstrumentInputs(int version, const YAML::Node& node);
-	bool LoadWaveformData(int version, const std::string& dataDir);
+	bool LoadWaveformData(int version, SessionReader& reader);
 	bool LoadWaveformDataForScope(
 		int version,
 		const YAML::Node& node,
 		std::shared_ptr<Oscilloscope> scope,
-		const std::string& dataDir);
+		SessionReader& reader);
 	bool LoadWaveformDataForFilters(
 		int version,
 		const YAML::Node& node,
-		const std::string& dataDir);
-	void DoLoadWaveformDataForStream(WaveformBase* cap, const std::string& format, const std::string& fname);
+		SessionReader& reader);
+	void DoLoadWaveformDataForStream(WaveformBase* cap, const std::string& format, SessionReader& reader, const std::string& path);
 	bool ConvertLegacyUniformWaveforms();
 
 	///@brief Version of the file being loaded

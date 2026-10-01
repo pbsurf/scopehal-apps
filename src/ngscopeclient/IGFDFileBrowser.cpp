@@ -44,12 +44,13 @@ IGFDFileBrowser::IGFDFileBrowser(
 	const string& initialPath,
 	const string& title,
 	const string& id,
-	const string& filterName,
-	const string& filterMask,
+	const vector<FileBrowserFilter>& filters,
 	bool saveDialog
 	)
 	: m_closed(false)
 	, m_closedOK(false)
+	, m_filters(filters)
+	, m_saveDialog(saveDialog)
 	, m_id(id)
 {
 	//If linux read ~/.config/gtk-3.0/bookmarks
@@ -79,14 +80,28 @@ IGFDFileBrowser::IGFDFileBrowser(
 		}
 	#endif
 
-	//Tweak the mask for imgui filedialog
+	//Tweak the mask for imgui filedialog: Name{.ext1,.ext2},Name2{.ext3}
 	//(needs to be in parentheses to be recognized as a regex)
 	//Special case for touchstone since internal parentheses aren't well supported by IGFD
 	string mask;
-	if(filterMask == "*.s*p")
-		mask = "Touchstone files (*.s*p){.s2p,.s3p,.s4p,.s5p,.s6p,.s7p,.s8p,.s9p,.snp}";
-	else
-		mask = filterName + "{" + filterMask.substr(1) + "}";
+	for(auto& f : filters)
+	{
+		if(!mask.empty())
+			mask += ",";
+		if(f.mask == "*.s*p")
+			mask += "Touchstone files (*.s*p){.s2p,.s3p,.s4p,.s5p,.s6p,.s7p,.s8p,.s9p,.snp}";
+		else
+		{
+			string exts;
+			for(auto& pattern : SplitFileBrowserMask(f.mask))
+			{
+				if(!exts.empty())
+					exts += ",";
+				exts += pattern.substr(1);
+			}
+			mask += f.name + "{" + exts + "}";
+		}
+	}
 
 	for(auto jt : m_bookmarks)
 		m_dialog.AddBookmark(jt.second, jt.first);
@@ -145,5 +160,47 @@ bool IGFDFileBrowser::IsClosedOK()
 
 string IGFDFileBrowser::GetFileName()
 {
-	return m_dialog.GetFilePathName();
+	string path = m_dialog.GetFilePathName();
+	if(!m_saveDialog)
+		return path;
+
+	//IGFD only adds the extension of the selected file type for simple filters, not for the "Name{.ext}" ones we use.
+	//So add it ourselves, unless the name already has one of the extensions offered (so typing an extension picks
+	//the file type, like in the native dialogs)
+	auto hasExtension = [&path](const string& pattern)
+	{
+		//Plain "*.ext" patterns only
+		if( (pattern.length() < 3) || (pattern.compare(0, 2, "*.") != 0) || (pattern.find('*', 1) != string::npos) )
+			return false;
+		string ext = pattern.substr(1);
+		if(path.length() < ext.length())
+			return false;
+		for(size_t i=0; i<ext.length(); i++)
+		{
+			auto c = static_cast<unsigned char>(path[path.length() - ext.length() + i]);
+			if(tolower(c) != tolower(static_cast<unsigned char>(ext[i])))
+				return false;
+		}
+		return true;
+	};
+	for(auto& f : m_filters)
+	{
+		for(auto& pattern : SplitFileBrowserMask(f.mask))
+		{
+			if(hasExtension(pattern))
+				return path;
+		}
+	}
+
+	auto current = m_dialog.GetCurrentFilter();
+	for(auto& f : m_filters)
+	{
+		if(f.name != current)
+			continue;
+		auto patterns = SplitFileBrowserMask(f.mask);
+		if(!patterns.empty() && (patterns[0].compare(0, 2, "*.") == 0) && (patterns[0].find('*', 1) == string::npos))
+			path += patterns[0].substr(1);
+		break;
+	}
+	return path;
 }

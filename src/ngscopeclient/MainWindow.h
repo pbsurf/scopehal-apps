@@ -531,8 +531,8 @@ protected:
 
 	void OnOpenFile(bool online);
 	void DoOpenFile(const std::string& sessionPath, bool online);
-	bool PreLoadSessionFromYaml(const YAML::Node& node, const std::string& dataDir, bool online);
-	bool LoadSessionFromYaml(const YAML::Node& node, const std::string& dataDir, bool online);
+	bool PreLoadSessionFromYaml(const YAML::Node& node, SessionReader& reader, bool online);
+	bool LoadSessionFromYaml(const YAML::Node& node, SessionReader& reader, bool online);
 public:
 	bool LoadUIConfiguration(int version, const YAML::Node& node);
 
@@ -545,9 +545,9 @@ public:
 protected:
 	void OnSaveAs();
 	void DoSaveFile(std::string sessionPath);
-	bool SaveSessionToYaml(YAML::Node& node, const std::string& dataDir);
-	void SaveLabNotes(const std::string& dataDir);
-	void LoadLabNotes(const std::string& dataDir);
+	bool SaveSessionToYaml(YAML::Node& node, SessionWriter& writer);
+	bool SaveLabNotes(SessionWriter& writer);
+	void LoadLabNotes(SessionReader& reader);
 	bool SetupDataDirectory(const std::string& dataDir);
 	YAML::Node SerializeUIConfiguration();
 	YAML::Node SerializeDialogs();
@@ -573,8 +573,11 @@ protected:
 	///@brief Current session file path
 	std::string m_sessionFileName;
 
-	///@brief Current session data directory
+	///@brief Current session data directory (empty if the session is an archive)
 	std::string m_sessionDataDir;
+
+	///@brief Reader for the session being loaded (kept until loading completes, which may wait for confirmation)
+	std::shared_ptr<SessionReader> m_sessionReader;
 
 	///@brief Last window title set (avoids redundant SDL_SetWindowTitle calls)
 	std::string m_lastWindowTitle;

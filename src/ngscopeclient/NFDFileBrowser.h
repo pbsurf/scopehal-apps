@@ -48,8 +48,7 @@ public:
 	NFDFileBrowser(
 		const std::string& initialPath,
 		const std::string& title,
-		const std::string& filterName,
-		const std::string& filterMask,
+		const std::vector<FileBrowserFilter>& filters,
 		bool saveDialog,
 		MainWindow* parent
 		);
@@ -67,8 +66,9 @@ protected:
 
 	std::string m_initialPath;
 	std::string m_title;
-	std::string m_filterName;
-	std::string m_filterMask;
+	///@brief Filter names and extension lists, in the format NFD wants
+	std::vector<std::string> m_filterNames;
+	std::vector<std::string> m_filterSpecs;
 	bool m_saveDialog;
 
 	std::future<std::optional<std::string> > m_future;

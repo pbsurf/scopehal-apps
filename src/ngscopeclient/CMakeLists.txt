@@ -119,6 +119,7 @@ add_executable(ngscopeclient
 	ScopeDeskewWizard.cpp
 	SCPIConsoleDialog.cpp
 	Session.cpp
+	SessionStorage.cpp
 	StreamBrowserDialog.cpp
 	TextureManager.cpp
 	TriggerGroup.cpp
@@ -232,6 +233,7 @@ target_link_libraries(ngscopeclient
 	scopehal
 	scopeprotocols
 	${NFD_LIBS}
+	miniz
 	PNG::PNG
 	ZLIB::ZLIB
 	${PLATFORM_LIBS}

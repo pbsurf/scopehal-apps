@@ -45,23 +45,34 @@ using namespace std;
 KDialogFileBrowser::KDialogFileBrowser(
 	const string& initialPath,
 	const string& title,
-	const string& filterName,
-	const string& filterMask,
+	const vector<FileBrowserFilter>& filters,
 	bool saveDialog
 	)
 	: m_initialPath(initialPath)
 	, m_title(title)
-	, m_filterName(filterName)
-	, m_filterMask(filterMask)
 	, m_saveDialog(saveDialog)
 	, m_cachedResultValid(false)
 {
-	//Trim off filter name
-	size_t iparen = m_filterName.find('(');
-	if(iparen != string::npos)
-		m_filterName = m_filterName.substr(0, iparen);
+	for(auto& f : filters)
+	{
+		//Trim off filter name
+		string name = f.name;
+		size_t iparen = name.find('(');
+		if(iparen != string::npos)
+			name = name.substr(0, iparen);
 
-	m_filterMask = filterMask.substr(2);
+		string patterns;
+		for(auto& pattern : SplitFileBrowserMask(f.mask))
+		{
+			if(!patterns.empty())
+				patterns += " ";
+			patterns += pattern;
+		}
+
+		if(!m_filter.empty())
+			m_filter += "\n";
+		m_filter += name + "(" + patterns + ")";
+	}
 
 	m_future = async(launch::async, [this]{return ThreadProc(); } );
 }
@@ -125,7 +136,7 @@ optional<string> KDialogFileBrowser::ThreadProc()
 		cmd += "--getopenfilename ";
 	cmd += string(" --title \"") + m_title + "\" ";
 	cmd += string("\"") + m_initialPath + "\" ";
-	cmd += string("\"") + m_filterName + "(*." + m_filterMask + ")\" ";
+	cmd += string("\"") + m_filter + "\" ";
 	LogTrace("Final command: %s\n", cmd.c_str());
 	FILE* fp = popen(cmd.c_str(), "r");
 	if(!fp)

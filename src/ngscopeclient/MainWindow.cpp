@@ -35,6 +35,7 @@
 #include "ngscopeclient.h"
 #include "ngscopeclient-version.h"
 #include "MainWindow.h"
+#include "SessionStorage.h"
 #include "FileSystem.h"
 
 #include <iostream>
@@ -347,6 +348,8 @@ void MainWindow::CloseSession()
 
 	m_sessionClosing = false;
 	m_sessionFileName = "";
+	m_sessionDataDir = "";
+	m_sessionReader = nullptr;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2355,13 +2358,16 @@ void MainWindow::RenderLoadWarningPopup()
 		{
 			//Continue with the load
 			//always loading online if we are warning, offline loads can't warn)
-			if(LoadSessionFromYaml(m_fileBeingLoaded[0], m_sessionDataDir, true))
+			if(LoadSessionFromYaml(m_fileBeingLoaded[0], *m_sessionReader, true))
 			{
 				m_recentFiles[m_sessionFileName] = time(nullptr);
 				SaveRecentFileList();
 			}
 			else
 				CloseSession();
+
+			//Done reading the session (an open archive can't be replaced when saving on Windows)
+			m_sessionReader = nullptr;
 
 			m_showingLoadWarnings = false;
 			m_fileLoadInProgress = false;
@@ -2708,13 +2714,19 @@ void MainWindow::OnOpenFile(bool online)
 		this,
 		".",
 		"Open Session",
-		"Session files (*.scopesession)",
-		"*.scopesession",
+		{
+			{"All sessions (*.scopesession *.scopearchive)", "*.scopesession;*.scopearchive"},
+			{"Session files (*.scopesession)", "*.scopesession"},
+			{"Session archives (*.scopearchive)", "*.scopearchive"}
+		},
 		false);
 }
 
 /**
 	@brief Handler for file | save as menu. Spawns the browser dialog
+
+	The format is chosen by the extension of the file name: a session file with a data directory next to it, or a
+	single archive file. Choosing a file type in the dialog adds its extension to a name without one.
  */
 void MainWindow::OnSaveAs()
 {
@@ -2723,8 +2735,10 @@ void MainWindow::OnSaveAs()
 		this,
 		".",
 		"Save Session",
-		"Session files (*.scopesession)",
-		"*.scopesession",
+		{
+			{"Session files (*.scopesession)", "*.scopesession"},
+			{"Session archives (*.scopearchive)", "*.scopearchive"}
+		},
 		true);
 }
 
@@ -2765,15 +2779,42 @@ void MainWindow::DoOpenFile(const string& sessionPath, bool online)
 	//Close any existing session
 	CloseSession();
 
-	//Get the data directory for the session
-	string base = sessionPath.substr(0, sessionPath.length() - strlen(".scopesession"));
-	string datadir = base + "_data";
+	//Archive, or session file with a data directory next to it?
+	shared_ptr<SessionReader> reader;
+	string datadir;
+	if(IsSessionArchivePath(sessionPath))
+	{
+		LogDebug("Opening session archive \"%s\"\n", sessionPath.c_str());
+		auto zreader = make_shared<ZipSessionReader>(sessionPath);
+		if(!zreader->IsOpen())
+		{
+			ShowErrorPopup(
+				"Cannot open file",
+				string("Could not open the session archive \"") + sessionPath + "\"!\n\n" + zreader->GetError());
+			return;
+		}
+		reader = zreader;
+	}
+	else
+	{
+		string base = sessionPath.substr(0, sessionPath.length() - strlen(".scopesession"));
+		datadir = base + "_data";
+		LogDebug("Opening session file \"%s\" (data directory %s)\n", sessionPath.c_str(), datadir.c_str());
+		reader = make_shared<DirectorySessionReader>(sessionPath, datadir);
+	}
 
-	LogDebug("Opening session file \"%s\" (data directory %s)\n", sessionPath.c_str(), datadir.c_str());
 	try
 	{
 		//Load all YAML
-		m_fileBeingLoaded = YAML::LoadAllFromFile(sessionPath);
+		string yaml;
+		if(!reader->ReadSessionFile(yaml))
+		{
+			ShowErrorPopup(
+				"Cannot open file",
+				string("Unable to open the file \"") + sessionPath + "\"!\n\n" + reader->GetError());
+			return;
+		}
+		m_fileBeingLoaded = YAML::LoadAll(yaml);
 		if(m_fileBeingLoaded.size() != 1)
 		{
 			ShowErrorPopup(
@@ -2787,9 +2828,10 @@ void MainWindow::DoOpenFile(const string& sessionPath, bool online)
 		//Save file path immediately
 		m_sessionFileName = sessionPath;
 		m_sessionDataDir = datadir;
+		m_sessionReader = reader;
 
 		//Run preload first, error out if this fails
-		if(!PreLoadSessionFromYaml(m_fileBeingLoaded[0], m_sessionDataDir, online))
+		if(!PreLoadSessionFromYaml(m_fileBeingLoaded[0], *reader, online))
 			m_fileLoadInProgress = false;
 
 		//Preload successful
@@ -2798,7 +2840,7 @@ void MainWindow::DoOpenFile(const string& sessionPath, bool online)
 			//Preload completed with no warnings, or loading offline? Commit now
 			if(!online || (m_session.GetWarnings().empty() && m_session.m_setupNotes.empty()) )
 			{
-				if(LoadSessionFromYaml(m_fileBeingLoaded[0], m_sessionDataDir, online))
+				if(LoadSessionFromYaml(m_fileBeingLoaded[0], *reader, online))
 				{
 					m_recentFiles[sessionPath] = time(nullptr);
 					SaveRecentFileList();
@@ -2809,6 +2851,9 @@ void MainWindow::DoOpenFile(const string& sessionPath, bool online)
 				//if something goes wrong there.
 				else
 					CloseSession();
+
+				//Done reading the session (an open archive can't be replaced when saving on Windows)
+				m_sessionReader = nullptr;
 			}
 
 			//Preload generated warnings, pop up confirmation dialog
@@ -2850,25 +2895,20 @@ void MainWindow::DoOpenFile(const string& sessionPath, bool online)
 	@brief Sanity check a YAML::Node (and associated data directory) to the current session without fully loading
 
 	@param node		Root YAML node of the file
-	@param dataDir	Path to the _data directory associated with the session
+	@param reader	Reader for the files associated with the session
 	@param online	True if we should reconnect to instruments
 
 	@return			True if successful, false on error
  */
-bool MainWindow::PreLoadSessionFromYaml(const YAML::Node& node, const string& dataDir, bool online)
+bool MainWindow::PreLoadSessionFromYaml(const YAML::Node& node, SessionReader& reader, bool online)
 {
 	//Load imgui_node_editor settings first (before creating the session)
-	ifstream ifs(dataDir + "/filtergraph.json");
-	if(ifs)
-	{
-		ifs >> m_graphEditorConfigBlob;
-		ifs.close();
-	}
+	reader.ReadTextFile("filtergraph.json", m_graphEditorConfigBlob);
 
 	//Load lab notes
-	LoadLabNotes(dataDir);
+	LoadLabNotes(reader);
 
-	if(!m_session.PreLoadFromYaml(node, dataDir, online))
+	if(!m_session.PreLoadFromYaml(node, reader, online))
 	{
 		//If loading fails, clean up any incomplete half-loaded stuff that might be in a bad state
 		CloseSession();
@@ -2884,14 +2924,14 @@ bool MainWindow::PreLoadSessionFromYaml(const YAML::Node& node, const string& da
 	You must call PreLoadSessionFromYaml before calling this function.
 
 	@param node		Root YAML node of the file
-	@param dataDir	Path to the _data directory associated with the session
+	@param reader	Reader for the files associated with the session
 	@param online	True if we should reconnect to instruments
 
 	@return			True if successful, false on error
  */
-bool MainWindow::LoadSessionFromYaml(const YAML::Node& node, const string& dataDir, bool online)
+bool MainWindow::LoadSessionFromYaml(const YAML::Node& node, SessionReader& reader, bool online)
 {
-	if(!m_session.LoadFromYaml(node, dataDir, online))
+	if(!m_session.LoadFromYaml(node, reader, online))
 	{
 		//If loading fails, clean up any incomplete half-loaded stuff that might be in a bad state
 		CloseSession();
@@ -2926,15 +2966,15 @@ bool MainWindow::LoadSessionFromYaml(const YAML::Node& node, const string& dataD
 
 	//Load ImGui configuration
 	LogTrace("Loading ImGui configuration\n");
-	string ipath = dataDir + "/imgui.ini";
-	if(filesystem::exists(ipath))
-		ImGui::LoadIniSettingsFromDisk(ipath.c_str());
+	string ini;
+	if(reader.ReadTextFile("imgui.ini", ini))
+		ImGui::LoadIniSettingsFromMemory(ini.c_str(), ini.size());
 
 	//No saved layout (session file copied without its data directory, or a legacy file)?
 	//Dock everything into a default layout next frame, rather than leaving tiny floating windows everywhere
 	else
 	{
-		LogWarning("No window layout found (%s), using default layout\n", ipath.c_str());
+		LogWarning("No window layout found (%s), using default layout\n", reader.Describe("imgui.ini").c_str());
 		m_newWaveformGroups.clear();
 		m_defaultLayoutRequest = true;
 	}
@@ -3377,42 +3417,52 @@ void MainWindow::DoSaveFile(string sessionPath)
 	//Saving the file conflicts with all other waveform data operations
 	lock_guard<shared_mutex> lock(m_session.GetWaveformDataMutex());
 
-	//If the filename does not end in .scopesession, add it
-	if(sessionPath.find(".scopesession") == string::npos)
-		sessionPath += ".scopesession";
+	//Save as a single archive, or a session file with a data directory next to it
+	unique_ptr<SessionWriter> writer;
+	string datadir;
+	if(IsSessionArchivePath(sessionPath))
+	{
+		LogDebug("Saving session archive \"%s\"\n", sessionPath.c_str());
+		auto zwriter = make_unique<ZipSessionWriter>(sessionPath);
+		if(!zwriter->IsOpen())
+		{
+			ShowErrorPopup("Failed to save session", zwriter->GetError());
+			return;
+		}
+		writer = std::move(zwriter);
+	}
+	else
+	{
+		//If the filename does not end in .scopesession, add it
+		if(!IsSessionFilePath(sessionPath))
+			sessionPath += ".scopesession";
 
-	//Get the data directory for the session
-	string base = sessionPath.substr(0, sessionPath.length() - strlen(".scopesession"));
-	string datadir = base + "_data";
-	LogDebug("Saving session file \"%s\" (data directory %s)\n", sessionPath.c_str(), datadir.c_str());
+		//Get the data directory for the session
+		string base = sessionPath.substr(0, sessionPath.length() - strlen(".scopesession"));
+		datadir = base + "_data";
+		LogDebug("Saving session file \"%s\" (data directory %s)\n", sessionPath.c_str(), datadir.c_str());
 
-	//Serialize the session
+		if(!SetupDataDirectory(datadir))
+			return;
+		writer = make_unique<DirectorySessionWriter>(sessionPath, datadir);
+	}
+
+	//Serialize the session, along with the lab notes
 	YAML::Node node{};
-	if(!SaveSessionToYaml(node, datadir))
-		return;
-
-	//Write the generated YAML to disk
-	ofstream outfs(sessionPath);
-	if(!outfs)
+	if(!SaveSessionToYaml(node, *writer) || !SaveLabNotes(*writer))
 	{
-		ShowErrorPopup(
-			"Cannot open file",
-			string("Failed to open output session file \"") + sessionPath + "\" for writing");
+		ShowErrorPopup("Failed to save session", writer->GetError());
 		return;
 	}
 
-	outfs << node;
-	outfs.close();
-
-	if(!outfs)
+	//Write the generated YAML, and finish writing the archive
+	YAML::Emitter out;
+	out << node;
+	if(!writer->WriteSessionFile(out.c_str()) || !writer->Finish())
 	{
-		ShowErrorPopup(
-			"Write failed",
-			string("Failed to write session file \"") + sessionPath + "\"");
+		ShowErrorPopup("Failed to save session", writer->GetError());
+		return;
 	}
-
-	//Save the lab notes
-	SaveLabNotes(datadir);
 
 	//Add to recent files list
 	m_sessionFileName = sessionPath;
@@ -3424,111 +3474,35 @@ void MainWindow::DoSaveFile(string sessionPath)
 /**
 	@brief Saves the lab notes to Markdown files in the data directory
  */
-void MainWindow::SaveLabNotes(const string& dataDir)
+bool MainWindow::SaveLabNotes(SessionWriter& writer)
 {
-	//Lab notes
-	auto setupfile = dataDir + "/setup.md";
-	ofstream setupfs(setupfile);
-	if(!setupfs)
-	{
-		ShowErrorPopup(
-			"Cannot open file",
-			string("Failed to open output markdown file \"") + setupfile + "\" for writing");
-		return;
-	}
-
-	setupfs << m_session.m_setupNotes;
-	setupfs.close();
-
-	if(!setupfs)
-	{
-		ShowErrorPopup(
-			"Write failed",
-			string("Failed to write markdown file \"") + setupfile + "\"");
-	}
-
-	//General notes
-	auto genfile = dataDir + "/labnotes.md";
-	ofstream genfs(genfile);
-	if(!genfs)
-	{
-		ShowErrorPopup(
-			"Cannot open file",
-			string("Failed to open output markdown file \"") + genfile + "\" for writing");
-		return;
-	}
-
-	genfs << m_session.m_generalNotes;
-	genfs.close();
-
-	if(!genfs)
-	{
-		ShowErrorPopup(
-			"Write failed",
-			string("Failed to write markdown file \"") + genfile + "\"");
-	}
+	return
+		writer.WriteTextFile("setup.md", m_session.m_setupNotes) &&
+		writer.WriteTextFile("labnotes.md", m_session.m_generalNotes);
 }
 
 /**
 	@brief Loads the lab notes from Markdown files in the data directory
  */
-void MainWindow::LoadLabNotes(const string& dataDir)
+void MainWindow::LoadLabNotes(SessionReader& reader)
 {
-	//Lab notes
-	auto setupfile = dataDir + "/setup.md";
-	FILE* fp = fopen(setupfile.c_str(), "r");
-	if(fp)
-	{
-		fseek(fp, 0, SEEK_END);
-		size_t len = ftell(fp);
-		fseek(fp, 0, SEEK_SET);
+	if(reader.Exists("setup.md") && !reader.ReadTextFile("setup.md", m_session.m_setupNotes))
+		LogWarning("failed to read setup file %s\n", reader.Describe("setup.md").c_str());
 
-		auto buf = new char[len+1];
-		if(len != fread(buf, 1, len, fp))
-			LogWarning("failed to read setup file %s\n", setupfile.c_str());
-		buf[len] = 0;
-
-		m_session.m_setupNotes = buf;
-
-		delete[] buf;
-		fclose(fp);
-	}
-
-	//General notes
-	auto genfile = dataDir + "/labnotes.md";
-	fp = fopen(genfile.c_str(), "r");
-	if(fp)
-	{
-		fseek(fp, 0, SEEK_END);
-		size_t len = ftell(fp);
-		fseek(fp, 0, SEEK_SET);
-
-		auto buf = new char[len+1];
-		if(len != fread(buf, 1, len, fp))
-			LogWarning("failed to read lab notes file %s\n", genfile.c_str());
-		buf[len] = 0;
-
-		m_session.m_generalNotes = buf;
-
-		delete[] buf;
-		fclose(fp);
-	}
+	if(reader.Exists("labnotes.md") && !reader.ReadTextFile("labnotes.md", m_session.m_generalNotes))
+		LogWarning("failed to read lab notes file %s\n", reader.Describe("labnotes.md").c_str());
 }
-
 
 /**
 	@brief Serialize the current session to a YAML::Node
 
 	@param node		Node for the main .scopesession
-	@param dataDir	Path to the _data directory (may not have been created yet)
+	@param writer	Writer for the other files making up the session
 
-	@return			True if successful, false on error
+	@return			True if successful, false on error (see writer.GetError())
  */
-bool MainWindow::SaveSessionToYaml(YAML::Node& node, const string& dataDir)
+bool MainWindow::SaveSessionToYaml(YAML::Node& node, SessionWriter& writer)
 {
-	if(!SetupDataDirectory(dataDir))
-		return false;
-
 	/*
 		version unspecified (treated as version 0): original string concatenation based glscopeclient impl
 		version 1: yaml-cpp glscopeclient
@@ -3546,27 +3520,18 @@ bool MainWindow::SaveSessionToYaml(YAML::Node& node, const string& dataDir)
 	//Save UI widgets
 	node["ui_config"] = SerializeUIConfiguration();
 
-	//TODO: waveform data
-	if(!m_session.SerializeWaveforms(dataDir))
+	//Waveform data
+	if(!m_session.SerializeWaveforms(writer))
 		return false;
 
 	//Save ImGui configuration
-	string ipath = dataDir + "/imgui.ini";
-	ImGui::SaveIniSettingsToDisk(ipath.c_str());
+	size_t inilen = 0;
+	const char* ini = ImGui::SaveIniSettingsToMemory(&inilen);
+	if(!writer.WriteTextFile("imgui.ini", string(ini, inilen)))
+		return false;
 
 	//Save imgui_node_editor settings
-	ofstream outfs(dataDir + "/filtergraph.json");
-	if(!outfs)
-	{
-		ShowErrorPopup(
-			"Failed to save filter graph configuration",
-			"Unable to open filtergraph.json for writing");
-		return false;
-	}
-	outfs << m_graphEditorConfigBlob;
-	outfs.close();
-
-	return true;
+	return writer.WriteTextFile("filtergraph.json", m_graphEditorConfigBlob);
 }
 
 /**

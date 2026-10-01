@@ -67,6 +67,22 @@ shared_ptr<FileBrowser> MakeFileBrowser(
 	const string& filterMask,
 	bool saveDialog)
 {
+	return MakeFileBrowser(wnd, initialPath, title, { FileBrowserFilter{filterName, filterMask} }, saveDialog);
+}
+
+/**
+	@brief Helper function to create the correct FileBrowser based on user preferences, offering several file types
+
+	The first filter is selected initially. When saving, a file name without an extension gets the extension of the
+	selected filter added by some browsers, but not all, so the caller should check the extension.
+ */
+shared_ptr<FileBrowser> MakeFileBrowser(
+	MainWindow* wnd,
+	const string& initialPath,
+	const string& title,
+	const vector<FileBrowserFilter>& filters,
+	bool saveDialog)
+{
 	auto pref = wnd->GetSession().GetPreferences().GetEnumRaw(
 		"Appearance.File Browser.dialogmode");
 
@@ -86,8 +102,7 @@ shared_ptr<FileBrowser> MakeFileBrowser(
 			initialPath,
 			title,
 			"FileChooser",
-			filterName,
-			filterMask,
+			filters,
 			saveDialog);
 	}
 	else
@@ -98,8 +113,7 @@ shared_ptr<FileBrowser> MakeFileBrowser(
 			return make_shared<KDialogFileBrowser>(
 				initialPath,
 				title,
-				filterName,
-				filterMask,
+				filters,
 				saveDialog);
 		}
 		#endif
@@ -107,9 +121,24 @@ shared_ptr<FileBrowser> MakeFileBrowser(
 		return make_shared<NFDFileBrowser>(
 			initialPath,
 			title,
-			filterName,
-			filterMask,
+			filters,
 			saveDialog,
 			wnd);
 	}
+}
+
+vector<string> SplitFileBrowserMask(const string& mask)
+{
+	vector<string> ret;
+	size_t start = 0;
+	while(start <= mask.length())
+	{
+		size_t end = mask.find(';', start);
+		if(end == string::npos)
+			end = mask.length();
+		if(end > start)
+			ret.push_back(mask.substr(start, end - start));
+		start = end + 1;
+	}
+	return ret;
 }

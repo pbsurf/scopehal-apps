@@ -50,8 +50,7 @@ public:
 	KDialogFileBrowser(
 		const std::string& initialPath,
 		const std::string& title,
-		const std::string& filterName,
-		const std::string& filterMask,
+		const std::vector<FileBrowserFilter>& filters,
 		bool saveDialog
 		);
 	virtual ~KDialogFileBrowser();
@@ -66,8 +65,8 @@ protected:
 
 	std::string m_initialPath;
 	std::string m_title;
-	std::string m_filterName;
-	std::string m_filterMask;
+	///@brief Filters in the format kdialog wants ("Name (*.ext1 *.ext2)", newline separated)
+	std::string m_filter;
 	bool m_saveDialog;
 
 	std::future<std::optional<std::string> > m_future;
