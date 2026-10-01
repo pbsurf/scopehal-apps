@@ -36,6 +36,7 @@
 #define WaveformGroup_h
 
 #include "WaveformArea.h"
+#include "FontManager.h"
 
 /**
 	@brief A WaveformGroup is a container for one or more WaveformArea's.
@@ -131,17 +132,16 @@ public:
 
 	void ClearPersistence();
 
-	float GetYAxisWidth()
-	{
-		//Hex numbers need more space to draw
-		//Check if we have any UNIT_HEXNUM areas in the group and scale it up
-		for(auto a : m_areas)
-		{
-			if(a->GetYAxisUnit() == Unit::UNIT_HEXNUM)
-				return 10 * ImGui::GetFontSize();
-		}
-		return 6 * ImGui::GetFontSize();
-	}
+	float GetYAxisWidth();
+
+	///@brief Height of the timeline, as of the last frame
+	float GetTimelineHeight()
+	{ return m_timelineHeight; }
+
+	bool IsCompactAxes();
+	FontWithSize GetXAxisFont();
+	FontWithSize GetYAxisFont();
+	static float GetFontPixelSize(FontWithSize font);
 
 	float GetSpacing()
 	{ return ImGui::GetFrameHeightWithSpacing() - ImGui::GetFrameHeight(); }
@@ -199,6 +199,7 @@ public:
 
 protected:
 	void RenderTimeline(float width, float height);
+	float XAxisLabelTop(ImVec2 pos, ImVec2 tsize, float padding);
 	void RenderTriggerPositionArrows(ImVec2 pos, float height);
 	void RenderXAxisCursors(ImVec2 pos, ImVec2 size);
 	void RenderMarkers(ImVec2 pos, ImVec2 size);
@@ -267,7 +268,7 @@ protected:
 	///@brief List of waveform areas to close next frame
 	std::vector< std::shared_ptr<WaveformArea> > m_areasToClose;
 
-	///@brief Height of the timeline
+	///@brief Height of the timeline (computed by Render() from the X axis font)
 	float m_timelineHeight;
 
 	///@brief X positions of the timeline's labeled graduations, in pixels from the left edge of the plot

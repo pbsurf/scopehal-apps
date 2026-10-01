@@ -283,7 +283,13 @@ bool WaveformGroup::Render()
 	}
 
 	//Render the timeline
-	m_timelineHeight = 2.5 * ImGui::GetFontSize();
+	//Normal: labels sit in the bottom half, below the fine ticks.
+	//Compact: labels sit directly below the (shorter) fine ticks.
+	float xfontSize = GetFontPixelSize(GetXAxisFont());
+	if(IsCompactAxes())
+		m_timelineHeight = ceil(1.5*xfontSize + 2);
+	else
+		m_timelineHeight = ceil(2*xfontSize + 2);
 	RenderTimeline(plotWidth, m_timelineHeight);
 
 	//Close any areas that we destroyed last frame
@@ -624,10 +630,10 @@ void WaveformGroup::RenderMarkers(ImVec2 pos, ImVec2 size)
 			auto tsize = ImGui::CalcTextSize(str.c_str());
 			float padding = 2;
 			float wrounding = 2;
-			float textTop = pos.y + m_timelineHeight - (padding + tsize.y);
+			float textTop = XAxisLabelTop(pos, tsize, padding);
 			list->AddRectFilled(
 				ImVec2(xpos - (2*padding + tsize.x), textTop - padding ),
-				ImVec2(xpos - 1, pos.y + m_timelineHeight),
+				ImVec2(xpos - 1, textTop + tsize.y + padding),
 				ImGui::GetColorU32(ImGuiCol_PopupBg),
 				wrounding);
 			list->AddText(
@@ -788,12 +794,12 @@ void WaveformGroup::RenderXAxisCursors(ImVec2 pos, ImVec2 size)
 		auto tsize = ImGui::CalcTextSize(str.c_str());
 		float padding = 2;
 		float wrounding = 2;
-		float textTop = pos.y + m_timelineHeight - (padding + tsize.y);
+		float textTop = XAxisLabelTop(pos, tsize, padding);
 		bool labelRight = (m_xAxisCursorMode == X_CURSOR_SINGLE) && (xpos0 < pos.x + size.x/2);
 		float labelLeft = labelRight ? (xpos0 + 1) : (xpos0 - (2*padding + tsize.x));
 		list->AddRectFilled(
 			ImVec2(labelLeft, textTop - padding ),
-			ImVec2(labelLeft + (2*padding + tsize.x) - 1, pos.y + m_timelineHeight),
+			ImVec2(labelLeft + (2*padding + tsize.x) - 1, textTop + tsize.y + padding),
 			ImGui::GetColorU32(ImGuiCol_PopupBg),
 			wrounding);
 		list->AddText(
@@ -817,10 +823,10 @@ void WaveformGroup::RenderXAxisCursors(ImVec2 pos, ImVec2 size)
 
 			//Text
 			tsize = ImGui::CalcTextSize(str.c_str());
-			textTop = pos.y + m_timelineHeight - (padding + tsize.y);
+			textTop = XAxisLabelTop(pos, tsize, padding);
 			list->AddRectFilled(
 				ImVec2(xpos1 + 1, textTop - padding ),
-				ImVec2(xpos1 + (2*padding + tsize.x), pos.y + m_timelineHeight),
+				ImVec2(xpos1 + (2*padding + tsize.x), textTop + tsize.y + padding),
 				ImGui::GetColorU32(ImGuiCol_PopupBg),
 				wrounding);
 			list->AddText(
@@ -967,6 +973,83 @@ void WaveformGroup::DoCursor(int iCursor, DragState state)
 	}
 }
 
+/**
+	@brief Returns the Y position of a cursor or marker label, anchored to the bottom of the timeline
+
+	Labels taller than the timeline (possible with compact axes) extend down into the plot instead of off the top.
+ */
+float WaveformGroup::XAxisLabelTop(ImVec2 pos, ImVec2 tsize, float padding)
+{
+	return max(pos.y + m_timelineHeight - (padding + tsize.y), pos.y + padding);
+}
+
+/**
+	@brief Returns true if the "compact axes" preference is set
+ */
+bool WaveformGroup::IsCompactAxes()
+{
+	return m_parent->GetSession().GetPreferences().GetBool("Appearance.Graphs.compact_axes");
+}
+
+/**
+	@brief Returns the X axis font, scaled down if compact axes are enabled
+ */
+FontWithSize WaveformGroup::GetXAxisFont()
+{
+	auto font = m_parent->GetFontPref("Appearance.Timeline.x_axis_font");
+	if(IsCompactAxes())
+		font.second *= 0.8;
+	return font;
+}
+
+/**
+	@brief Returns the Y axis font, scaled down if compact axes are enabled
+ */
+FontWithSize WaveformGroup::GetYAxisFont()
+{
+	auto font = m_parent->GetFontPref("Appearance.Graphs.y_axis_font");
+	if(IsCompactAxes())
+		font.second *= 0.9;
+	return font;
+}
+
+/**
+	@brief Returns the rendered size of a font in pixels, including DPI and global font scaling
+ */
+float WaveformGroup::GetFontPixelSize(FontWithSize font)
+{
+	ImGui::PushFont(font.first, font.second);
+	float size = ImGui::GetFontSize();
+	ImGui::PopFont();
+	return size;
+}
+
+/**
+	@brief Returns the width of the Y axis, based on the Y axis font
+ */
+float WaveformGroup::GetYAxisWidth()
+{
+	float fontSize = GetFontPixelSize(GetYAxisFont());
+
+	if(!IsCompactAxes())
+	{
+		//Hex numbers need more space to draw
+		//Check if we have any UNIT_HEXNUM areas in the group and scale it up
+		for(auto a : m_areas)
+		{
+			if(a->GetYAxisUnit() == Unit::UNIT_HEXNUM)
+				return 10 * fontSize;
+		}
+		return 6 * fontSize;
+	}
+
+	//Compact: just wide enough for the widest label drawn last frame, plus the trigger level arrow and margins
+	float widest = 0;
+	for(auto a : m_areas)
+		widest = max(widest, a->GetYAxisLabelWidth());
+	return ceil(max(widest + 0.6f*fontSize + 10, 3*fontSize));
+}
+
 void WaveformGroup::RenderTimeline(float width, float height)
 {
 	ImGui::BeginChild("timeline", ImVec2(width, height));
@@ -977,8 +1060,9 @@ void WaveformGroup::RenderTimeline(float width, float height)
 	auto& prefs = m_parent->GetSession().GetPreferences();
 	auto color = prefs.GetColor("Appearance.Timeline.axis_color");
 	auto textcolor = prefs.GetColor("Appearance.Timeline.text_color");
-	auto font = m_parent->GetFontPref("Appearance.Timeline.x_axis_font");
+	auto font = GetXAxisFont();
 	ImGui::PushFont(font.first, font.second);
+	bool compact = IsCompactAxes();
 
 	//Reserve an empty area for the timeline
 	auto pos = ImGui::GetWindowPos();
@@ -1039,12 +1123,12 @@ void WaveformGroup::RenderTimeline(float width, float height)
 	}
 
 	//Dimensions for various things
-	float fineTickLength = 10;
+	float fineTickLength = compact ? round(0.5*ImGui::GetFontSize()) : 10;
 	float coarseTickLength = height;
 	const double min_label_grad_width = 6 * ImGui::GetFontSize();	//Minimum distance between text labels
 	float thickLineWidth = 2;
 	float thinLineWidth = 1;
-	float ymid = pos.y + height/2;
+	float labelTop = compact ? (pos.y + fineTickLength) : (pos.y + height/2);
 
 	//Grid line positions for the waveform areas, filled in as the ticks are drawn
 	m_majorGridX.clear();
@@ -1146,7 +1230,7 @@ void WaveformGroup::RenderTimeline(float width, float height)
 
 		//Render label
 		list->AddText(
-			ImVec2(x + textMargin, ymid),
+			ImVec2(x + textMargin, labelTop),
 			textcolor,
 			labelFor(t).c_str());
 	}

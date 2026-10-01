@@ -640,6 +640,10 @@ public:
 	Unit GetYAxisUnit()
 	{ return m_yAxisUnit; }
 
+	///@brief Width of the widest Y axis label drawn last frame
+	float GetYAxisLabelWidth()
+	{ return m_yAxisLabelWidth; }
+
 	/**
 		@brief Returns true if the mouse is over a button, rather than the plot area
 
@@ -654,6 +658,9 @@ protected:
 
 	///@brief Cached plot height
 	float m_height;
+
+	///@brief Width of the widest Y axis label drawn last frame (used to size compact axes)
+	float m_yAxisLabelWidth;
 
 	///@brief Cached Y axis offset
 	float m_yAxisOffset;

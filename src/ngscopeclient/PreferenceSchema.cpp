@@ -472,6 +472,12 @@ void PreferenceManager::InitializeDefaults()
 				Preference::Font("y_axis_font", FontDescription(FindDataFile("fonts/DejaVuSans.ttf"), 13))
 					.Label("Y axis font")
 					.Description("Font used for Y axis text"));
+			graphs.AddPreference(
+				Preference::Bool("compact_axes", false)
+					.Label("Compact axes")
+					.Description(
+						"Shrink the X and Y axes to leave more room for waveforms.\n"
+						"Axis text is drawn smaller, the timeline is shorter, and the Y axis is only as wide as its labels."));
 
 		auto& logs = appearance.AddCategory("Log Viewer");
 			logs.AddPreference(

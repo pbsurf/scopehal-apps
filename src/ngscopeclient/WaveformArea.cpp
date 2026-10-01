@@ -366,6 +366,7 @@ YAML::Node DisplayedChannel::Serialize(IDTable& table) const
 WaveformArea::WaveformArea(StreamDescriptor stream, shared_ptr<WaveformGroup> group, MainWindow* parent)
 	: m_width(1)
 	, m_height(1)
+	, m_yAxisLabelWidth(0)
 	, m_yAxisOffset(0)
 	, m_ymid(0)
 	, m_pixelsPerYAxisUnit(1)
@@ -799,8 +800,9 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 
 	ImGui::PushID(to_string(iArea).c_str());
 
-	float totalHeightAvailable = floor(clientArea.y - 2*ImGui::GetFrameHeightWithSpacing());
+	//The group's timeline is above us, followed by item spacing
 	float spacing = m_group->GetSpacing();
+	float totalHeightAvailable = floor(clientArea.y - (m_group->GetTimelineHeight() + spacing));
 	float heightPerArea = totalHeightAvailable / numAreas;
 	float totalSpacing = (numAreas-1)*spacing;
 	float unspacedHeightPerArea = floor( (totalHeightAvailable - totalSpacing) / numAreas);
@@ -3312,7 +3314,7 @@ void WaveformArea::RenderYAxis(ImVec2 size, map<float, float>& gridmap, float vb
 	float ybot = origin.y + size.y;
 
 	//Style settings
-	auto font = m_parent->GetFontPref("Appearance.Graphs.y_axis_font");
+	auto font = m_group->GetYAxisFont();
 	ImGui::PushFont(font.first, font.second);
 	auto& prefs = m_parent->GetSession().GetPreferences();
 	auto textColor = prefs.GetColor("Appearance.Graphs.y_axis_text_color");
@@ -3365,6 +3367,7 @@ void WaveformArea::RenderYAxis(ImVec2 size, map<float, float>& gridmap, float vb
 
 	//Draw text for the Y axis labels
 	float xmargin = 5;
+	m_yAxisLabelWidth = 0;
 	for(auto it : gridmap)
 	{
 		float vlo = YPositionToYAxisUnits(it.second - 0.5);
@@ -3377,6 +3380,8 @@ void WaveformArea::RenderYAxis(ImVec2 size, map<float, float>& gridmap, float vb
 			continue;
 		if(y < ytop)
 			continue;
+
+		m_yAxisLabelWidth = max(m_yAxisLabelWidth, tsize.x);
 
 		draw_list->AddText(ImVec2(origin.x + size.x - tsize.x - xmargin, y), textColor, label.c_str());
 	}
