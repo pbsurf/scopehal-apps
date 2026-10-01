@@ -186,6 +186,12 @@ struct PeakLabel
 	///@brief Size of the label box in pixels, including padding (for collision detection)
 	ImVec2 m_labelSize;
 
+	///@brief Time (in seconds) the text has been narrower than the label box
+	float m_shrinkTime;
+
+	///@brief Widest the text has been (in pixels, including padding) during m_shrinkTime
+	float m_shrinkWidth;
+
 	/**
 		@brief Alpha decay. Decays at a fixed rate after the peak disappears
 

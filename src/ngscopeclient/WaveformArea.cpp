@@ -1687,12 +1687,23 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 
 		//Size is set when we measure the text
 		npeak.m_labelSize = ImVec2(0, 0);
+		npeak.m_shrinkTime = 0;
+		npeak.m_shrinkWidth = 0;
 
 		//Default to 100% alpha
 		npeak.m_peakAlpha = 255;
 
 		labels.push_back(npeak);
 		claimed.push_back(true);
+	}
+
+	//Hide labels for peaks no longer in the list right away, so we never show more labels than peaks.
+	//Keep them (hidden) until alpha decays to -255, so a peak that comes back gets its old label position.
+	//A label being dragged stays visible and fades as before, so it doesn't vanish from under the mouse.
+	for(size_t i=0; i<labels.size(); i++)
+	{
+		if(!claimed[i] && !IsDraggingPeakLabel(labels[i]))
+			labels[i].m_peakAlpha = min(labels[i].m_peakAlpha, -1.0f);
 	}
 
 	auto wmin = ImGui::GetWindowPos();
@@ -1706,6 +1717,7 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 	auto uwfm = dynamic_cast<UniformWaveformBase*>(stream.GetData());
 	int64_t binsize = uwfm ? uwfm->m_timescale : 0;
 	auto xunit = stream.GetXAxisUnits();
+	auto yunit = stream.GetYAxisUnits();
 
 	//Format the text of each visible label and measure it
 	float padding = 2;
@@ -1727,12 +1739,42 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 		else
 			fwhm = "FWHM = " + xunit.PrettyPrint(label.m_fwhm);
 
+		//Y gets a fixed number of digits, so the text doesn't change width every time the value does
+		//(by default PrettyPrint() shows as many digits as the float has, which changes from one waveform to the next)
+		string yval;
+		if(yunit.IsLogarithmic())
+			yval = yunit.PrettyPrintTabular(label.m_peakYpos, 0, 2);
+		else
+			yval = yunit.PrettyPrint(label.m_peakYpos, 4);
+
 		text[i] =
 			"X = " + xunit.PrettyPrintInt64WithResolution(label.m_peakXpos, binsize / 10.0) + "\n" +
-			"Y = " + stream.GetYAxisUnits().PrettyPrint(label.m_peakYpos) + "\n" +
+			"Y = " + yval + "\n" +
 			fwhm;
 		auto textSizePixels = ImGui::CalcTextSize(text[i].c_str());
-		label.m_labelSize = ImVec2(textSizePixels.x + 2*padding, textSizePixels.y + 2*padding);
+		label.m_labelSize.y = textSizePixels.y + 2*padding;
+
+		//The label is positioned by its center and the text is left aligned, so a change in width moves the text.
+		//Grow right away, but only shrink once the text has been narrower for a while, so changing values don't
+		//make the text jitter. Shrink to the widest the text was in that time
+		float width = textSizePixels.x + 2*padding;
+		if(width >= label.m_labelSize.x)
+		{
+			label.m_labelSize.x = width;
+			label.m_shrinkTime = 0;
+			label.m_shrinkWidth = 0;
+		}
+		else
+		{
+			label.m_shrinkTime += dt;
+			label.m_shrinkWidth = max(label.m_shrinkWidth, width);
+			if(label.m_shrinkTime > 1)
+			{
+				label.m_labelSize.x = label.m_shrinkWidth;
+				label.m_shrinkTime = 0;
+				label.m_shrinkWidth = 0;
+			}
+		}
 	}
 
 	//Physics. Hidden labels don't take part, and dragged labels don't move.
