@@ -1115,6 +1115,7 @@ void WaveformGroup::RenderTimeline(float width, float height)
 		if(dx != 0)
 		{
 			m_xAxisOffset -= PixelsToXAxisUnits(dx);
+			ClampXAxisOffset();
 			ClearPersistence();
 		}
 
@@ -1490,6 +1491,7 @@ void WaveformGroup::OnZoomInHorizontal(int64_t target, float step)
 	//Change the zoom
 	m_pixelsPerXUnit *= step;
 	m_xAxisOffset = target - (delta/step);
+	ClampXAxisOffset();
 
 	ClearPersistence();
 }
@@ -1505,6 +1507,7 @@ void WaveformGroup::OnZoomOutHorizontal(int64_t target, float step)
 	//Change the zoom
 	m_pixelsPerXUnit /= step;
 	m_xAxisOffset = target - (delta*step);
+	ClampXAxisOffset();
 
 	ClearPersistence();
 }
@@ -1514,6 +1517,7 @@ void WaveformGroup::OnPanHorizontal(float step)
 	//TODO: Clamp to bounds of all waveforms in the group
 
 	m_xAxisOffset -=  PixelsToXAxisUnits(step * 100);
+	ClampXAxisOffset();
 
 	ClearPersistence();
 }
@@ -1526,6 +1530,7 @@ void WaveformGroup::OnPanHorizontal(float step)
 void WaveformGroup::OnPanPixels(float dx)
 {
 	m_xAxisOffset -= PixelsToXAxisUnits(dx);
+	ClampXAxisOffset();
 
 	ClearPersistence();
 }
@@ -1582,6 +1587,8 @@ void WaveformGroup::NavigateToTimestamp(int64_t timestamp, int64_t duration, Str
 	//Just center the packet
 	else
 		m_xAxisOffset = timestamp - 0.5*(m_width / m_pixelsPerXUnit);
+
+	ClampXAxisOffset();
 
 	//If it's a packet, and we have a single vertical cursor, move it there
 	if( (duration > 0) && (m_xAxisCursorMode == X_CURSOR_SINGLE) )
@@ -1699,6 +1706,7 @@ void WaveformGroup::ZoomToXRange(int64_t start, int64_t end, float width)
 
 	m_pixelsPerXUnit = width / (end - start);
 	m_xAxisOffset = start;
+	ClampXAxisOffset();
 	ClearPersistence();
 }
 
@@ -1716,7 +1724,51 @@ void WaveformGroup::ZoomHorizontalAround(int64_t target, float xpos, float pixel
 
 	m_pixelsPerXUnit = pixelsPerXUnit;
 	m_xAxisOffset = target - PixelsToXAxisUnits(xpos - m_xpos);
+	ClampXAxisOffset();
 	ClearPersistence();
+}
+
+/**
+	@brief Keeps the view from scrolling past the start of the data, where that makes sense
+
+	Currently this only applies to frequency domain plots where every waveform starts at or above 0 Hz (e.g. the FFT of
+	a real valued signal): the left edge of the view is not allowed to go below 0 Hz, since there's never any data
+	there. Spectra that do have negative frequencies (e.g. the FFT of complex I/Q data) are not limited.
+
+	Density plots (e.g. waterfalls) in the group are ignored.
+ */
+void WaveformGroup::ClampXAxisOffset()
+{
+	auto type = m_xAxisUnit.GetType();
+	if( (type != Unit::UNIT_HZ) && (type != Unit::UNIT_MICROHZ) )
+		return;
+
+	if(m_xAxisOffset >= 0)
+		return;
+
+	//Only clamp if we have data, and none of it is below 0 Hz
+	bool dataFound = false;
+	auto areas = GetWaveformAreas();
+	for(auto a : areas)
+	{
+		for(size_t i=0; i<a->GetStreamCount(); i++)
+		{
+			auto data = a->GetStream(i).GetData();
+			if( (data == nullptr) || (data->size() == 0) )
+				continue;
+			auto sdata = dynamic_cast<SparseWaveformBase*>(data);
+			auto udata = dynamic_cast<UniformWaveformBase*>(data);
+			if(!sdata && !udata)
+				continue;
+
+			if(GetOffsetScaled(sdata, udata, 0) < 0)
+				return;
+			dataFound = true;
+		}
+	}
+
+	if(dataFound)
+		m_xAxisOffset = 0;
 }
 
 void WaveformGroup::AutofitHorizontal(float width)

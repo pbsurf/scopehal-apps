@@ -226,6 +226,7 @@ protected:
 
 	int64_t GetRoundingDivisor(int64_t width_xunits);
 	void OnMouseWheel(float delta);
+	void ClampXAxisOffset();
 
 	///@brief Top level window we're attached to
 	MainWindow* m_parent;
