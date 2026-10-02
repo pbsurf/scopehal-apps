@@ -253,6 +253,7 @@ public:
 	}
 
 	virtual void Render();
+	void DoBackgroundWork();
 
 	void QueueCloseSession()
 	{ m_sessionClosing = true; }

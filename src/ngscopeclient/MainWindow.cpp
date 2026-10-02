@@ -701,30 +701,15 @@ void MainWindow::ResetStyle()
 	}
 }
 
-void MainWindow::RenderUI()
+/**
+	@brief Does the per-frame work that doesn't draw anything, such as taking in new waveforms
+
+	Called at the start of RenderUI(), and by the main loop instead of Render() while no window is on screen
+	(see VulkanWindow::IsHidden()), so acquisition, history and HTTP export keep working while minimized.
+	Must not call any ImGui functions, since it may run outside a frame.
+ */
+void MainWindow::DoBackgroundWork()
 {
-	//Update window title only if necessary, in case this is expensive on some platforms
-	string title = m_title + " - ";
-	if(m_sessionFileName.empty())
-		title += "[unsaved session]";
-	else
-	{
-		std::filesystem::path path(m_sessionFileName);
-		title += path.filename().string();
-	}
-	if(m_lastWindowTitle != title)
-	{
-		m_lastWindowTitle = title;
-		SDL_SetWindowTitle(m_window, title.c_str());
-	}
-
-	auto defaultFont = GetFontPref("Appearance.General.default_font");
-	ImGui::PushFont(defaultFont.first, defaultFont.second);
-
-	ResetStyle();
-
-	m_needRender = false;
-
 	//Apply HTTP export preferences (cheap no-op if nothing changed)
 	{
 		auto& prefs = m_session.GetPreferences();
@@ -744,14 +729,6 @@ void MainWindow::RenderUI()
 			LogVerbose("HTTP export: client requested a %s acquisition\n", force ? "forced" : "single");
 			m_session.ArmTrigger(force ? TriggerGroup::TRIGGER_TYPE_FORCED : TriggerGroup::TRIGGER_TYPE_SINGLE);
 		}
-	}
-
-	//Keep references to all of our waveform textures until next frame
-	//Any groups we're closing will be destroyed at the start of that frame, once rendering has finished
-	{
-		lock_guard<recursive_mutex> lock(m_waveformGroupsMutex);
-		for(auto g : m_waveformGroups)
-			g->ReferenceWaveformTextures();
 	}
 
 	//Destroy all waveform groups we were asked to close
@@ -778,6 +755,41 @@ void MainWindow::RenderUI()
 		for(auto it : m_protocolAnalyzerDialogs)
 			it.second->OnWaveformLoaded(t);
 	}
+}
+
+void MainWindow::RenderUI()
+{
+	//Update window title only if necessary, in case this is expensive on some platforms
+	string title = m_title + " - ";
+	if(m_sessionFileName.empty())
+		title += "[unsaved session]";
+	else
+	{
+		std::filesystem::path path(m_sessionFileName);
+		title += path.filename().string();
+	}
+	if(m_lastWindowTitle != title)
+	{
+		m_lastWindowTitle = title;
+		SDL_SetWindowTitle(m_window, title.c_str());
+	}
+
+	auto defaultFont = GetFontPref("Appearance.General.default_font");
+	ImGui::PushFont(defaultFont.first, defaultFont.second);
+
+	ResetStyle();
+
+	m_needRender = false;
+
+	//Keep references to all of our waveform textures until next frame
+	//Any groups we're closing will be destroyed at the start of that frame, once rendering has finished
+	{
+		lock_guard<recursive_mutex> lock(m_waveformGroupsMutex);
+		for(auto g : m_waveformGroups)
+			g->ReferenceWaveformTextures();
+	}
+
+	DoBackgroundWork();
 
 	//Menu for main window
 	MainMenu();

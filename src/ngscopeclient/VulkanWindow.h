@@ -57,6 +57,8 @@ public:
 
 	virtual void Render();
 
+	bool IsHidden();
+
 	std::shared_ptr<QueueHandle> GetRenderQueue()
 	{ return m_renderQueue; }
 

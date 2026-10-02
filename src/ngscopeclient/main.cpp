@@ -366,20 +366,32 @@ int main(int argc, char* argv[])
 		//the frame after the click that opened it, new windows are sized on their first frame, and so on.
 		//So after an event we render a few frames without waiting, then keep polling quickly for a while
 		//(for things that happen a fixed time after the mouse stops, like tooltips) before going back to sleep.
+		//While no window is on screen (e.g. minimized), we don't draw frames at all, in either mode: the loop sleeps
+		//until an event and only does the background work, such as taking in new waveforms. The waveform thread and
+		//HTTP export trigger requests wake it up, so the timeout is only a safety net.
 		const int settleFrameCount = 3;
 		const Uint32 activeWindowMs = 1000;
 		const int activePollMs = 33;
+		const int hiddenPollMs = 250;
 		int settleFramesLeft = 0;
 		Uint32 lastEventTicks = 0;
+
+		HTTPExportServer::Get().SetTriggerRequestCallback(WakeMainLoop);
 
 		SDL_Event event;
 		while(!g_mainWindow->ShouldClose())
 		{
 			bool hadEvent = false;
 
+			//How long to wait for an event before going on (negative = don't wait)
+			int timeoutMs = -1;
+			bool hidden = g_mainWindow->IsHidden();
+			if(hidden)
+				timeoutMs = hiddenPollMs;
+
 			//Check which event loop model to use
 			//(never sleep with an uncapped framerate, since that's only used for benchmarking)
-			if( (session.GetPreferences().GetEnumRaw("Power.Events.event_driven_ui") == 1) &&
+			else if( (session.GetPreferences().GetEnumRaw("Power.Events.event_driven_ui") == 1) &&
 				!g_mainWindow->IsUncappedFramerate() )
 			{
 				if(settleFramesLeft > 0)
@@ -392,19 +404,19 @@ int main(int argc, char* argv[])
 				else
 				{
 					//polling_timeout preference is in femtoseconds; SDL_WaitEventTimeout wants milliseconds
-					int timeoutMs = (int)(
+					timeoutMs = (int)(
 						session.GetPreferences().GetReal("Power.Events.polling_timeout") / FS_PER_SECOND * 1000.0);
 					if( (SDL_GetTicks() - lastEventTicks) < activeWindowMs)
 						timeoutMs = min(timeoutMs, activePollMs);
-
-					if(SDL_WaitEventTimeout(&event, timeoutMs))
-					{
-						hadEvent = true;
-						ImGui_ImplSDL2_ProcessEvent(&event);
-						if(IsQuitEvent(event))
-							g_mainWindow->RequestClose();
-					}
 				}
+			}
+
+			if( (timeoutMs >= 0) && SDL_WaitEventTimeout(&event, timeoutMs))
+			{
+				hadEvent = true;
+				ImGui_ImplSDL2_ProcessEvent(&event);
+				if(IsQuitEvent(event))
+					g_mainWindow->RequestClose();
 			}
 
 			//Drain any additional events pending this frame (SDL_WaitEventTimeout only pops one)
@@ -422,9 +434,14 @@ int main(int argc, char* argv[])
 				lastEventTicks = SDL_GetTicks();
 			}
 
-			//Draw the main window
-			g_mainWindow->Render();
+			//Draw the main window, or if nothing is on screen just do the work that doesn't need a frame
+			if(hidden)
+				g_mainWindow->DoBackgroundWork();
+			else
+				g_mainWindow->Render();
 		}
+		HTTPExportServer::Get().SetTriggerRequestCallback(nullptr);
+
 		// Store window position and size for next startup
 		g_mainWindow->SaveWindowPositionAndSize();
 

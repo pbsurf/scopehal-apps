@@ -803,6 +803,41 @@ void VulkanWindow::RenderUI()
 }
 
 /**
+	@brief Checks if none of our windows are on screen, so there's no point in drawing a frame
+
+	This means the main window is minimized and so is every other platform window (e.g. a dialog dragged outside the
+	main window, when viewports are enabled). The main loop skips Render() entirely while this is true.
+ */
+bool VulkanWindow::IsHidden()
+{
+	if(!(SDL_GetWindowFlags(m_window) & SDL_WINDOW_MINIMIZED))
+		return false;
+
+	auto& platformIO = ImGui::GetPlatformIO();
+	for(auto viewport : platformIO.Viewports)
+	{
+		if(viewport == ImGui::GetMainViewport())
+			continue;
+
+		//Windows hides these along with the main window, since imgui_impl_sdl2 makes it their owner.
+		//Ask Windows directly, since SDL doesn't necessarily notice.
+		#ifdef _WIN32
+			auto hwnd = static_cast<HWND>(viewport->PlatformHandleRaw);
+			if(hwnd && IsWindowVisible(hwnd) && !IsIconic(hwnd))
+				return false;
+		#else
+			//(imgui_impl_sdl2 stores the SDL window ID in PlatformHandle)
+			auto id = static_cast<Uint32>(reinterpret_cast<intptr_t>(viewport->PlatformHandle));
+			auto window = SDL_GetWindowFromID(id);
+			if(window && !(SDL_GetWindowFlags(window) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)))
+				return false;
+		#endif
+	}
+
+	return true;
+}
+
+/**
 	@brief Scrolls the window under a two finger touchscreen drag so its content follows the fingers
 
 	Picks the target window the same way Dear ImGui picks the window to scroll with the mouse wheel
