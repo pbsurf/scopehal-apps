@@ -566,6 +566,7 @@ protected:
 	void RenderWaterfallWaveform(std::shared_ptr<DisplayedChannel> channel, ImVec2 start, ImVec2 size);
 	void RenderSpectrogramWaveform(std::shared_ptr<DisplayedChannel> channel, ImVec2 start, ImVec2 size);
 	void RenderSpectrumPeaks(ImDrawList* list, std::shared_ptr<DisplayedChannel> channel);
+	void RenderOffscreenPeakMarkers(ImDrawList* list, std::shared_ptr<DisplayedChannel> channel, size_t npeaks);
 	void RenderDigitalWaveform(std::shared_ptr<DisplayedChannel> channel, ImVec2 start, ImVec2 size);
 	void RenderProtocolWaveform(std::shared_ptr<DisplayedChannel> channel, ImVec2 start, ImVec2 size);
 	void RenderDigitalBusWaveform(std::shared_ptr<DisplayedChannel> channel, ImVec2 start, ImVec2 size);
@@ -651,12 +652,12 @@ public:
 	{ return m_yAxisLabelWidth; }
 
 	/**
-		@brief Returns true if the mouse is over a button, rather than the plot area
+		@brief Returns true if the mouse is over a button (or off-screen peak marker), rather than the plot area
 
 		Only valid after rendering is complete before start of the next render cycle
 	 */
 	bool IsMouseOverButtonAtEndOfRender()
-	{ return m_mouseOverButton; }
+	{ return m_mouseOverButton || m_mouseOverPeakMarker; }
 
 protected:
 	///@brief Cached plot width (excluding Y axis)
@@ -795,6 +796,9 @@ protected:
 
 	///@brief True if the mouse cursor is over a channel button
 	bool m_mouseOverButton;
+
+	///@brief True if the mouse cursor is over a marker for an off-screen peak
+	bool m_mouseOverPeakMarker;
 
 	///@brief Horizontal cursor configuration
 	enum YAxisCursorMode

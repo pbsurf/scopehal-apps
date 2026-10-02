@@ -392,6 +392,7 @@ WaveformArea::WaveformArea(StreamDescriptor stream, shared_ptr<WaveformGroup> gr
 	, m_channelButtonHeight(0)
 	, m_dragPeakLabelId(0)
 	, m_mouseOverButton(false)
+	, m_mouseOverPeakMarker(false)
 	, m_yAxisCursorMode(Y_CURSOR_NONE)
 	, m_cursorPlacedThisFrame(false)
 {
@@ -866,6 +867,7 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 		PlotContextMenu();
 
 		//Draw actual waveforms (and protocol decode overlays)
+		m_mouseOverPeakMarker = false;
 		RenderWaveforms(pos, csize);
 
 		ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
@@ -958,7 +960,10 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 		RenderYAxisCursors(pos, csize, yAxisWidth);
 	}
 	else
+	{
 		m_mouseOverButton = false;
+		m_mouseOverPeakMarker = false;
+	}
 	ImGui::EndChild();
 
 	//Handle help messages
@@ -1092,7 +1097,7 @@ void WaveformArea::RenderYAxisCursors(ImVec2 pos, ImVec2 size, float yAxisWidth)
 
 	//Default help text related to cursors (may change if we're over a cursor)
 	if(ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
-		!m_mouseOverButton && (m_dragState == DRAG_STATE_NONE) )
+		!m_mouseOverButton && !m_mouseOverPeakMarker && (m_dragState == DRAG_STATE_NONE) )
 	{
 		if(m_yAxisCursorMode != Y_CURSOR_NONE)
 			m_parent->AddStatusHelp("mouse_lmb", "Place first cursor");
@@ -1631,6 +1636,11 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 	float neighborThresholdPixels = 3 * ImGui::GetFontSize();
 	int64_t neighborThresholdXUnits = m_group->PixelsToXAxisUnits(neighborThresholdPixels);
 
+	//Clip to the plot, so peaks and labels don't draw over the Y axis
+	ImVec2 wmin = m_plotPos;
+	ImVec2 wmax(m_plotPos.x + m_plotSize.x, m_plotPos.y + m_plotSize.y);
+	list->PushClipRect(wmin, wmax, true);
+
 	//Go through the list of peaks and decay all of the alpha values
 	for(size_t i=0; i<labels.size(); )
 	{
@@ -1727,10 +1737,6 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 			labels[i].m_peakAlpha = min(labels[i].m_peakAlpha, -1.0f);
 	}
 
-	auto wmin = ImGui::GetWindowPos();
-	auto wsize = ImGui::GetWindowSize();
-	ImVec2 wmax(wmin.x + wsize.x, wmin.y + wsize.y);
-
 	auto font = m_parent->GetFontPref("Appearance.Peaks.label_font");
 	ImGui::PushFont(font.first, font.second);
 
@@ -1820,6 +1826,7 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 		}
 
 		//Physics 2: If peak is on screen but label is not, push the label back on screen.
+		//On screen means inside the plot, so labels don't sit under the Y axis.
 		//Don't move along an axis where the label doesn't fit.
 		//TODO: omit if label is manually positioned?
 		bool peakIsOnScreen = (peak.x >= wmin.x) && (peak.x <= wmax.x) && (peak.y >= wmin.y) && (peak.y <= wmax.y);
@@ -1965,10 +1972,10 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 			lineColor,
 			1);
 
-		//Start dragging
+		//Start dragging (only on the part of the label inside the plot, since the rest is clipped)
 		bool mouseHit =
-			(mousePos.x >= labelLeft) && (mousePos.x <= labelRight) &&
-			(mousePos.y >= labelTop) && (mousePos.y <= labelBottom);
+			(mousePos.x >= max(labelLeft, wmin.x)) && (mousePos.x <= min(labelRight, wmax.x)) &&
+			(mousePos.y >= max(labelTop, wmin.y)) && (mousePos.y <= min(labelBottom, wmax.y));
 		if(mouseHit && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 		{
 			m_dragPeakChannel = channel;
@@ -1998,6 +2005,169 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 			text[i].c_str());
 	}
 	ImGui::PopFont();
+
+	RenderOffscreenPeakMarkers(list, channel, npeaks);
+
+	list->PopClipRect();
+}
+
+/**
+	@brief Draw markers at the left and right edges of the plot for labeled peaks that are scrolled off screen
+
+	There's one marker per side, showing how many peaks are off screen that way. Hovering lists them, and clicking
+	centers the tallest one.
+
+	@param list		Draw list to render to
+	@param channel	Channel whose peaks are being drawn
+	@param npeaks	Number of peaks (from the tallest) that are labeled
+ */
+void WaveformArea::RenderOffscreenPeakMarkers(ImDrawList* list, shared_ptr<DisplayedChannel> channel, size_t npeaks)
+{
+	auto stream = channel->GetStream();
+	auto pf = dynamic_cast<PeakDetectionFilter*>(stream.m_channel);
+	auto& peaks = pf->GetPeaks();
+	npeaks = min(npeaks, peaks.size());
+
+	float plotLeft = m_plotPos.x;
+	float plotRight = m_plotPos.x + m_plotSize.x;
+	float plotTop = m_plotPos.y;
+	float plotBottom = m_plotPos.y + m_plotSize.y;
+
+	//Find the peaks off each side. Peaks are sorted tallest first, so the first one on each side is the tallest
+	vector<size_t> offscreen[2];	//left, right
+	for(size_t i=0; i<npeaks; i++)
+	{
+		float x = m_group->XAxisUnitsToXPosition(peaks[i].m_x);
+		if(x < plotLeft)
+			offscreen[0].push_back(i);
+		else if(x > plotRight)
+			offscreen[1].push_back(i);
+	}
+	if(offscreen[0].empty() && offscreen[1].empty())
+		return;
+
+	auto uwfm = dynamic_cast<UniformWaveformBase*>(stream.GetData());
+	int64_t binsize = uwfm ? uwfm->m_timescale : 0;
+	auto xunit = stream.GetXAxisUnits();
+	auto yunit = stream.GetYAxisUnits();
+
+	auto chancolor = ColorFromString(stream.m_channel->m_displaycolor);
+	auto fcolor = ImGui::ColorConvertU32ToFloat4(chancolor);
+	auto& prefs = m_parent->GetSession().GetPreferences();
+	auto textColor = prefs.GetColor("Appearance.Peaks.peak_text_color");
+	auto mousePos = ImGui::GetMousePos();
+
+	//Only interact if nothing else is using the mouse
+	bool canInteract =
+		ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
+		(m_dragState == DRAG_STATE_NONE) &&
+		!m_group->IsDraggingSomething() &&
+		!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+
+	auto font = m_parent->GetFontPref("Appearance.Peaks.label_font");
+	ImGui::PushFont(font.first, font.second);
+	float padding = 2;
+	float arrowSize = ImGui::GetFontSize() * 0.4;
+	float rounding = 3;
+
+	int tooltipSide = -1;
+	for(int side=0; side<2; side++)
+	{
+		auto& indexes = offscreen[side];
+		if(indexes.empty())
+			continue;
+		bool left = (side == 0);
+		auto& tallest = peaks[indexes[0]];
+
+		auto count = to_string(indexes.size());
+		auto textSize = ImGui::CalcTextSize(count.c_str());
+		float width = 3*padding + arrowSize + textSize.x;
+		float height = 2*padding + max(textSize.y, 2*arrowSize);
+
+		//At the height of the tallest peak on that side, but kept inside the plot
+		float ymid = YAxisUnitsToYPosition(tallest.m_y);
+		ymid = max(ymid, plotTop + height/2);
+		ymid = min(ymid, plotBottom - height/2);
+
+		float boxLeft = left ? plotLeft : (plotRight - width);
+		ImVec2 tl(boxLeft, ymid - height/2);
+		ImVec2 br(boxLeft + width, ymid + height/2);
+
+		bool hovered = canInteract &&
+			(mousePos.x >= tl.x) && (mousePos.x <= br.x) && (mousePos.y >= tl.y) && (mousePos.y <= br.y);
+		if(hovered)
+			m_mouseOverPeakMarker = true;
+
+		//Box, like the peak labels, lighter when hovered
+		float fmul = hovered ? 0.5 : 0.3;
+		auto fillColor = ImGui::ColorConvertFloat4ToU32(ImVec4(fcolor.x*fmul, fcolor.y*fmul, fcolor.z*fmul, 1));
+		list->AddRectFilled(tl, br, fillColor, rounding);
+		list->AddRect(tl, br, chancolor, rounding);
+
+		//Arrow pointing off screen, at the outer edge, with the count on the inner side
+		if(left)
+		{
+			float tipX = tl.x + padding;
+			list->AddTriangleFilled(
+				ImVec2(tipX, ymid),
+				ImVec2(tipX + arrowSize, ymid - arrowSize),
+				ImVec2(tipX + arrowSize, ymid + arrowSize),
+				textColor);
+			list->AddText(ImVec2(tipX + arrowSize + padding, ymid - textSize.y/2), textColor, count.c_str());
+		}
+		else
+		{
+			float tipX = br.x - padding;
+			list->AddTriangleFilled(
+				ImVec2(tipX, ymid),
+				ImVec2(tipX - arrowSize, ymid + arrowSize),
+				ImVec2(tipX - arrowSize, ymid - arrowSize),
+				textColor);
+			list->AddText(ImVec2(tl.x + padding, ymid - textSize.y/2), textColor, count.c_str());
+		}
+
+		if(!hovered)
+			continue;
+
+		m_parent->AddStatusHelp("mouse_lmb", "Go to tallest off-screen peak");
+		tooltipSide = side;
+
+		//Click centers the tallest peak. Hold the click as a (labelless) peak drag until release,
+		//so it doesn't also start a pan or place a Y axis cursor
+		if(ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+		{
+			float xcenter = (plotLeft + plotRight) / 2;
+			m_group->OnPanPixels(xcenter - m_group->XAxisUnitsToXPosition(tallest.m_x));
+			m_parent->SetNeedRender();
+
+			m_dragState = DRAG_STATE_PEAK_MARKER;
+			m_dragPeakChannel.reset();
+			m_dragPeakLabelId = 0;
+		}
+	}
+
+	ImGui::PopFont();
+
+	//List the peaks off the hovered side (after popping the label font, so the tooltip uses the normal one)
+	if(tooltipSide < 0)
+		return;
+	MainWindow::SetTooltipPosition();
+	ImGui::BeginTooltip();
+	ImGui::TextUnformatted( (tooltipSide == 0) ? "Peaks off screen to the left:" : "Peaks off screen to the right:");
+	for(auto i : offscreen[tooltipSide])
+	{
+		auto& p = peaks[i];
+		string yval;
+		if(yunit.IsLogarithmic())
+			yval = yunit.PrettyPrintTabular(p.m_y, 0, 2);
+		else
+			yval = yunit.PrettyPrint(p.m_y, 4);
+		auto line =
+			"X = " + xunit.PrettyPrintInt64WithResolution(p.m_x, binsize / 10.0) + ", " +
+			"Y = " + yval;
+		ImGui::TextUnformatted(line.c_str());
+	}
+	ImGui::EndTooltip();
 }
 
 /**
