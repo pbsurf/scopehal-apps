@@ -904,12 +904,7 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 
 			//Double tap (or double click) and drag vertically zooms the horizontal axis, for touch input.
 			//Checked before drag start, so the second tap doesn't begin a pan.
-			//The touch backend detects double taps itself, since imgui's double click timing is unreliable for touch
-			//(the backend delays each press until the finger is lifted or has moved)
-			else if(canDragPlot &&
-				( (ImGui::GetIO().MouseSource == ImGuiMouseSource_TouchScreen) ?
-					(ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui_ImplSDL2_IsTouchDoubleTap()) :
-					ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) ) )
+			else if(ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && canDragPlot)
 			{
 				m_dragState = DRAG_STATE_TAP_ZOOM;
 				m_tapZoomStart = ImGui::GetMousePos();

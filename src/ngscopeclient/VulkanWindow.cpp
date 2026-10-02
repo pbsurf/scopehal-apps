@@ -653,10 +653,9 @@ void VulkanWindow::Render()
 	}
 	ImGui_ImplSDL2_NewFrame();
 
-	//Fingers land less precisely than a mouse, so allow more distance between the taps of a double tap.
+	//The two taps of a touchscreen double tap are often 20-80 px apart at 2x scaling, more than imgui's default allows.
 	//(Set before NewFrame() since that's where double clicks are detected)
-	auto& io = ImGui::GetIO();
-	io.MouseDoubleClickMaxDist = (io.MouseSource == ImGuiMouseSource_TouchScreen) ? 20.0f : 6.0f;
+	ImGui::GetIO().MouseDoubleClickMaxDistTouch = 40 * max(ImGui::GetMainViewport()->DpiScale, 1.0f);
 
 	ImGui::NewFrame();
 	ScrollWithTouchPan();
