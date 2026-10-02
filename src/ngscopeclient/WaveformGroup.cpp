@@ -1144,10 +1144,15 @@ void WaveformGroup::RenderTimeline(float width, float height)
 	int64_t width_xunits = width / xscale;
 	auto round_divisor = GetRoundingDivisor(width_xunits);
 
-	//Labels are exact (as many digits as needed to tell them apart), so they get longer as we zoom in
+	//Labels are exact (as many digits as needed to tell them apart), so they get longer as we zoom in.
+	//They all use the SI prefix for the end of the visible range farthest from zero, so they match each other
+	//(e.g. "0 μs" rather than "0 fs" next to "1 μs")
 	float textMargin = 2;
+	int64_t scaleReference = max(
+		llabs(m_xAxisOffset),
+		llabs(m_xAxisOffset + width_xunits));
 	auto labelFor = [&](double t)
-	{ return m_xAxisUnit.PrettyPrintInt64(llround(t), Unit::MAX_INT64_DECIMALS); };
+	{ return m_xAxisUnit.PrettyPrintInt64WithScale(llround(t), scaleReference, Unit::MAX_INT64_DECIMALS); };
 
 	//Figure out about how much time per graduation to use
 	//If the labels don't fit at that spacing, space them out more

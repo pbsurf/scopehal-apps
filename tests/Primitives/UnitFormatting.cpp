@@ -110,6 +110,24 @@ TEST_CASE("Primitive_UnitPrettyPrintInt64_MicroHz")
 	REQUIRE(uhz.PrettyPrintInt64WithResolution(123456789012345LL, 1e5, false) == "123.456789 MHz");
 }
 
+TEST_CASE("Primitive_UnitPrettyPrintInt64WithScale")
+{
+	//Axis labels share the prefix of the largest value, so zero and small values match their neighbors
+	Unit fs(Unit::UNIT_FS);
+	REQUIRE(fs.PrettyPrintInt64WithScale(0, 2000000000, 9, false) == "0 " "\xce\xbc" "s");
+	REQUIRE(fs.PrettyPrintInt64WithScale(500000000, 2000000000, 9, false) == "0.5 " "\xce\xbc" "s");
+	REQUIRE(fs.PrettyPrintInt64WithScale(-500000000, 2000000000, 9, false) == "-0.5 " "\xce\xbc" "s");
+	REQUIRE(fs.PrettyPrintInt64WithScale(1500000000, 1500000000, 9, false) == "1.5 " "\xce\xbc" "s");
+
+	Unit uhz(Unit::UNIT_MICROHZ);
+	REQUIRE(uhz.PrettyPrintInt64WithScale(0, 2000000000000LL, Unit::MAX_INT64_DECIMALS, false) == "0 MHz");
+	REQUIRE(uhz.PrettyPrintInt64WithScale(250000000000LL, 2000000000000LL, Unit::MAX_INT64_DECIMALS, false)
+		== "0.25 MHz");
+
+	//Same as PrettyPrintInt64 when the reference is the value itself
+	REQUIRE(fs.PrettyPrintInt64WithScale(0, 0, 9, false) == fs.PrettyPrintInt64(0, 9, false));
+}
+
 TEST_CASE("Primitive_UnitPrettyPrint")
 {
 	Unit hz(Unit::UNIT_HZ);
