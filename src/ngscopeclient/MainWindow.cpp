@@ -731,6 +731,9 @@ void MainWindow::DoBackgroundWork()
 		}
 	}
 
+	//Apply driver preferences to connected instruments (cheap no-op if nothing changed)
+	m_session.ApplyPreferencesIfChanged();
+
 	//Destroy all waveform groups we were asked to close
 	//Block until all background processing completes to ensure no command buffers are still pending
 	if(!m_groupsToClose.empty())

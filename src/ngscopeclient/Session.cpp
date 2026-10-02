@@ -49,6 +49,7 @@
 #include "../scopehal/SiglentSCPIOscilloscope.h"
 #include "../scopehal/RSRTB2kOscilloscope.h"
 #include "../scopehal/RigolOscilloscope.h"
+#include "../scopehal/IIOSDR.h"
 #include "../scopehal/MockOscilloscope.h"
 #include "../scopehal/MockPowerSupply.h"
 #include "../scopeprotocols/EyePattern.h"
@@ -1677,10 +1678,7 @@ bool Session::PreLoadSDR(int version, const YAML::Node& node, bool online)
 		return true;
 	}
 
-	//Make any config settings to the instrument from our preference settings
-	//ApplyPreferences(sdr);
-
-	//All good. Add to our list of specs etc
+	//All good. Add to our list of specs etc (this also applies our preference settings)
 	AddInstrument(sdr, false);
 	m_idtable.emplace(node["id"].as<uintptr_t>(), (Instrument*)sdr.get());
 
@@ -2985,9 +2983,12 @@ shared_ptr<TriggerGroup> Session::GetTriggerGroupForFilter(PausableFilter* filte
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Instrument management
 
-void Session::ApplyPreferences(shared_ptr<Oscilloscope> scope)
+/**
+	@brief Applies driver-specific preference settings to an instrument
+ */
+void Session::ApplyPreferences(shared_ptr<Instrument> inst)
 {
-	//Apply driver-specific preference settings
+	auto scope = dynamic_pointer_cast<Oscilloscope>(inst);
 	auto lecroy = dynamic_pointer_cast<LeCroyOscilloscope>(scope);
 	if(lecroy)
 	{
@@ -3035,6 +3036,40 @@ void Session::ApplyPreferences(shared_ptr<Oscilloscope> scope)
 			rigol->ForceHDMode(true);
 		}
 	}
+#ifdef HAS_IIO
+	auto iio = dynamic_pointer_cast<IIOSDR>(inst);
+	if(iio)
+		iio->SetSweepStepFraction(GetPreferences().GetReal("Drivers.IIO SDR.sweep_step"));
+#endif
+}
+
+/**
+	@brief Applies driver preference settings to every instrument, if they've changed since last time
+
+	Called every frame, so changes made in the preferences dialog take effect without reconnecting.
+	Instruments get the current settings when they're added, so there's nothing to do the first time.
+ */
+void Session::ApplyPreferencesIfChanged()
+{
+	auto& children = GetPreferences().AllPreferences().GetChildren();
+	auto it = children.find("Drivers");
+	if(it == children.end())
+		return;
+
+	YAML::Node node;
+	it->second->ToYAML(node);
+	auto prefs = YAML::Dump(node);
+	if(prefs == m_lastDriverPreferences)
+		return;
+
+	bool first = m_lastDriverPreferences.empty();
+	m_lastDriverPreferences = prefs;
+	if(first)
+		return;
+
+	LogTrace("Driver preferences changed, applying to all instruments\n");
+	for(auto inst : GetInstruments())
+		ApplyPreferences(inst);
 }
 
 /**
@@ -3126,6 +3161,9 @@ bool Session::CreateAndAddInstrument(const string& driver, SCPITransport* transp
 void Session::AddInstrument(shared_ptr<Instrument> inst, bool createDialogs)
 {
 	m_modifiedSinceLastSave = true;
+
+	//Make any config settings to the instrument from our preference settings
+	ApplyPreferences(inst);
 
 	lock_guard<mutex> lock(m_scopeMutex);
 

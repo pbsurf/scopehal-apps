@@ -265,7 +265,8 @@ public:
 		}
 	}
 
-	void ApplyPreferences(std::shared_ptr<Oscilloscope> scope);
+	void ApplyPreferences(std::shared_ptr<Instrument> inst);
+	void ApplyPreferencesIfChanged();
 
 	size_t GetFilterCount();
 
@@ -491,6 +492,9 @@ protected:
 
 	///@brief True if the session has been modified since last time it was saved
 	bool m_modifiedSinceLastSave;
+
+	///@brief Driver preferences as of the last time they were applied, to see if they've changed since
+	std::string m_lastDriverPreferences;
 
 	///@brief Oscilloscopes we are currently connected to
 	std::map<std::shared_ptr<Oscilloscope>, std::shared_ptr<OscilloscopeState> > m_oscilloscopes;

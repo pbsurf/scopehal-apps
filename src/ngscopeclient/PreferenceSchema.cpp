@@ -650,6 +650,22 @@ void PreferenceManager::InitializeDefaults()
 				.EnumValue("All non-MSO channels", HEADLESS_STARTUP_ALL_NON_MSO)
 				.EnumValue("Channel 1 only", HEADLESS_STARTUP_C1_ONLY) );
 
+		auto& iio = drivers.AddCategory("IIO SDR");
+			iio.AddPreference(
+				Preference::Real("sweep_step", 0.8)
+					.Label("Sweep step")
+					.Description(
+					"How far the LO moves between captures when sweeping a span wider than the radio can capture at "
+					"once (ADALM-PLUTO etc), as a percentage of the bandwidth of one capture (the sample rate).\n\n"
+					"The rest of each capture overlaps the next one. The Spectrum Stitch filter only uses the middle of "
+					"each capture (half a step either side of the LO), so smaller steps leave out more of the edges, "
+					"where the analog filter rolls off and ADC noise isn't fully filtered out. This gives a flatter "
+					"noise floor, at the cost of more captures per sweep.\n\n"
+					"Limited to 10 - 100%. Changes take effect at the start of the next sweep."
+						)
+					.Unit(Unit::UNIT_PERCENT)
+				);
+
 		auto& rigol = drivers.AddCategory("Rigol DHO");
 			rigol.AddPreference(
 				Preference::Enum("data_width", WIDTH_AUTO)

@@ -35,6 +35,7 @@
 #include "../../lib/scopehal/scopehal.h"
 #include "../../lib/scopehal/SCPIIIOTransport.h"
 #include "../../lib/scopehal/SCPISDR.h"
+#include "../../lib/scopehal/IIOSDR.h"
 
 #ifdef HAS_IIO
 
@@ -477,6 +478,104 @@ TEST_CASE("IIOSDR_Sweep")
 	REQUIRE(sdr->PopPendingWaveform());
 	REQUIRE(!sdr->IsTriggerArmed());
 	REQUIRE(fabs(chan->GetScalarValue(2) - 3800000000.0) < 256);
+}
+
+TEST_CASE("IIOSDR_SweepStep")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9363", ctx);
+	auto iio = dynamic_pointer_cast<IIOSDR>(sdr);
+	REQUIRE(iio != nullptr);
+	auto chan = sdr->GetChannel(0);
+
+	//The LO step can be changed (ngscopeclient sets it from a preference), and is limited to 10 - 100%
+	REQUIRE(iio->GetSweepStepFraction() == 0.8);
+	iio->SetSweepStepFraction(0.01);
+	REQUIRE(iio->GetSweepStepFraction() == 0.1);
+	iio->SetSweepStepFraction(2);
+	REQUIRE(iio->GetSweepStepFraction() == 1.0);
+
+	//Half the bandwidth is 10 MHz (a whole number of FFT bins), so it takes six steps to cover 60 MHz
+	const size_t depth = 4096;
+	sdr->SetSampleDepth(depth);
+	sdr->SetSampleRate(20000000);
+	sdr->SetCenterFrequency(0, 2420000000);
+	sdr->SetSweepEnabled(true);
+	sdr->SetSpan(60000000);
+	iio->SetSweepStepFraction(0.5);
+	sdr->BackgroundProcessing();
+
+	const size_t nsteps = 6;
+	sdr->StartSingleTrigger();
+	for(size_t i=0; i<nsteps; i++)
+	{
+		REQUIRE(sdr->IsTriggerArmed());
+		REQUIRE(sdr->AcquireData());
+		REQUIRE(sdr->PopPendingWaveform());
+
+		double expected = 2420000000 + (i - (nsteps - 1) / 2.0) * 10000000;
+		REQUIRE(fabs(chan->GetScalarValue(2) - expected) < 256);
+	}
+	REQUIRE(!sdr->IsTriggerArmed());
+
+	//Changing it mid sweep starts the sweep over with the new steps
+	sdr->StartSingleTrigger();
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	iio->SetSweepStepFraction(0.8);
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	const double bin = 20000000.0 / depth;
+	const double step = floor(16000000 / bin) * bin;
+	REQUIRE(fabs(chan->GetScalarValue(2) - (2420000000 - 1.5 * step)) < 256);
+	sdr->Stop();
+}
+
+TEST_CASE("IIOSDR_SweepQueued")
+{
+	//Captures can pile up while the filter graph is busy. Each one has to come out with the center frequency it was
+	//captured at, not wherever the LO has got to since.
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9363", ctx);
+	auto chan = sdr->GetChannel(0);
+
+	const size_t depth = 4096;
+	sdr->SetSampleDepth(depth);
+	sdr->SetSampleRate(20000000);
+	sdr->SetCenterFrequency(0, 2420000000);
+	sdr->SetSweepEnabled(true);
+	sdr->SetSpan(60000000);
+	sdr->BackgroundProcessing();
+
+	const double bin = 20000000.0 / depth;
+	const double step = floor(16000000 / bin) * bin;
+	const size_t nsteps = 4;
+
+	sdr->StartSingleTrigger();
+	for(size_t i=0; i<nsteps; i++)
+		REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->GetPendingWaveformCount() == nsteps);
+
+	for(size_t i=0; i<nsteps; i++)
+	{
+		REQUIRE(sdr->PopPendingWaveform());
+		double expected = 2420000000 + (i - (nsteps - 1) / 2.0) * step;
+		REQUIRE(fabs(chan->GetScalarValue(2) - expected) < 1);
+	}
+	REQUIRE(!sdr->PopPendingWaveform());
+
+	//Clearing the queue clears the values with it, so the next capture still gets its own
+	sdr->StartSingleTrigger();
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->AcquireData());
+	sdr->ClearPendingWaveforms();
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	REQUIRE(fabs(chan->GetScalarValue(2) - (2420000000 + 0.5 * step)) < 1);
+	REQUIRE(!sdr->PopPendingWaveform());
+	sdr->Stop();
 }
 
 TEST_CASE("IIOSDR_ContinuousAndDisabledChannels")
