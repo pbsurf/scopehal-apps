@@ -140,15 +140,8 @@ DisplayedChannel::~DisplayedChannel()
 	auto schan = dynamic_cast<OscilloscopeChannel*>(m_sourceStream.m_channel);
 	if(schan)
 	{
-		//Remove pausable filters from trigger group when they're deleted
-		//TODO: potential race condition here?
-		auto pf = dynamic_cast<PausableFilter*>(schan);
-		if(pf && (pf->GetRefCount() == 1))
-		{
-			LogTrace("Deleting last copy of pausable filter, removing from trigger group\n");
-			m_session.GetTriggerGroupForFilter(pf)->RemoveFilter(pf);
-		}
-
+		//(pausable filters remove themselves from their trigger group when they're deleted, see
+		//Session::OnPausableFilterDestroyed)
 		auto scope = schan->GetScope();
 		schan->Release();
 

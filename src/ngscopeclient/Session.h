@@ -519,6 +519,11 @@ protected:
 	///@brief Mutex controlling access to m_triggerGroups
 	std::recursive_mutex m_triggerGroupMutex;
 
+	void OnPausableFilterDestroyed(PausableFilter* filter);
+
+	///@brief Connection to PausableFilter::signal_destroyed(), to remove deleted filters from trigger groups
+	sigc::connection m_pausableFilterDestroyedConnection;
+
 	///@brief Worker threads and other bookkeeping metadata for instruments
 	std::map<std::shared_ptr<Instrument>, std::shared_ptr<InstrumentConnectionState> > m_instrumentStates;
 

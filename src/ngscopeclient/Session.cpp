@@ -123,12 +123,17 @@ Session::Session(MainWindow* wnd)
 	SCPIBERT::EnumDrivers(m_driverNamesByType["bert"]);
 	SCPIMiscInstrument::EnumDrivers(m_driverNamesByType["misc"]);
 	SCPIVNA::EnumDrivers(m_driverNamesByType["vna"]);
+
+	//Trigger groups keep raw pointers to pausable filters, so drop them when a filter is deleted
+	m_pausableFilterDestroyedConnection = PausableFilter::signal_destroyed().connect(
+		sigc::mem_fun(*this, &Session::OnPausableFilterDestroyed));
 }
 
 Session::~Session()
 {
 	Clear();
 	DestroyReferenceFilters();
+	m_pausableFilterDestroyedConnection.disconnect();
 }
 
 /**
@@ -2096,7 +2101,15 @@ bool Session::LoadTriggerGroups(const YAML::Node& node)
 				group = make_shared<TriggerGroup>(nullptr, this);
 
 			for(auto fid : filters)
-				group->m_filters.push_back(m_idtable.Lookup<PausableFilter>(fid.as<int64_t>()));
+			{
+				//Older versions could save filters that had already been deleted, which don't resolve to anything
+				auto f = m_idtable.Lookup<PausableFilter>(fid.as<int64_t>());
+				if(f)
+					group->m_filters.push_back(f);
+				else
+					LogWarning("Trigger group refers to filter %" PRId64 ", which doesn't exist, ignoring it\n",
+						fid.as<int64_t>());
+			}
 		}
 
 		m_triggerGroups.push_back(group);
@@ -2352,7 +2365,10 @@ YAML::Node Session::SerializeTriggerGroups()
 		//Filters
 		YAML::Node fnode;
 		for(size_t i=0; i<group->m_filters.size(); i++)
-			fnode.push_back(m_idtable[group->m_filters[i]]);
+		{
+			if(group->m_filters[i])
+				fnode.push_back(m_idtable[group->m_filters[i]]);
+		}
 		gnode["filters"] = fnode;
 
 		node[string("group") + to_string(gid)] = gnode;
@@ -2938,6 +2954,19 @@ shared_ptr<TriggerGroup> Session::GetTriggerGroupForScope(shared_ptr<Oscilloscop
 /**
 	@brief Gets the trigger group that contains a specified filter
  */
+/**
+	@brief Removes a pausable filter that is being deleted from any trigger group it's in
+
+	A filter is deleted by whoever releases the last reference to it (a view, another filter, etc), so this is the only
+	place that reliably sees it go away.
+ */
+void Session::OnPausableFilterDestroyed(PausableFilter* filter)
+{
+	lock_guard<recursive_mutex> lock(m_triggerGroupMutex);
+	for(auto group : m_triggerGroups)
+		group->RemoveFilter(filter);
+}
+
 shared_ptr<TriggerGroup> Session::GetTriggerGroupForFilter(PausableFilter* filter)
 {
 	lock_guard<recursive_mutex> lock(m_triggerGroupMutex);
