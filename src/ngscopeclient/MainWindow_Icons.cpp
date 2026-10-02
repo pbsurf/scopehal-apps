@@ -190,6 +190,7 @@
 #include "../scopeprotocols/SDDataDecoder.h"
 #include "../scopeprotocols/SetupHoldMeasurement.h"
 #include "../scopeprotocols/SpectrogramFilter.h"
+#include "../scopeprotocols/SpectrumStitchFilter.h"
 #include "../scopeprotocols/SPIDecoder.h"
 #include "../scopeprotocols/SquelchFilter.h"
 #include "../scopeprotocols/StepGeneratorFilter.h"
@@ -418,6 +419,7 @@ void MainWindow::LoadFilterIcons()
 	m_texmgr.LoadTexture("filter-setup-hold", FindDataFile("icons/filters/filter-setup-hold.png"));
 	m_texmgr.LoadTexture("filter-sine", FindDataFile("icons/filters/filter-sine.png"));
 	m_texmgr.LoadTexture("filter-spectrogram", FindDataFile("icons/filters/filter-spectrogram.png"));
+	m_texmgr.LoadTexture("filter-spectrum-stitch", FindDataFile("icons/filters/filter-spectrum-stitch.png"));
 	m_texmgr.LoadTexture("filter-spi", FindDataFile("icons/filters/filter-spi.png"));
 	m_texmgr.LoadTexture("filter-squelch", FindDataFile("icons/filters/filter-squelch.png"));
 	m_texmgr.LoadTexture("filter-step", FindDataFile("icons/filters/filter-step.png"));
@@ -621,6 +623,7 @@ void MainWindow::LoadFilterIcons()
 	m_filterIconMap[type_index(typeid(TwoPortShuntThroughFilter))] 				= "filter-2-port-shunt";
 	m_filterIconMap[type_index(typeid(OvershootMeasurement))]					= "filter-overshoot";
 	m_filterIconMap[type_index(typeid(SpectrogramFilter))]						= "filter-spectrogram";
+	m_filterIconMap[type_index(typeid(SpectrumStitchFilter))]					= "filter-spectrum-stitch";
 	m_filterIconMap[type_index(typeid(UartClockRecoveryFilter))]	 			= "filter-clock-recovery-uart";
 	m_filterIconMap[type_index(typeid(UARTDecoder))]	 						= "filter-uart";
 	m_filterIconMap[type_index(typeid(USB2PMADecoder))] 						= "filter-usb2-pma";
