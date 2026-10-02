@@ -43,6 +43,8 @@
 #include "../../lib/scopeprotocols/scopeprotocols.h"
 #include "Filters.h"
 #include "../../lib/scopehal/FilterGraphExecutor.h"
+#include "../../lib/scopehal/SCPISDR.h"
+#include "../../lib/scopehal/SCPIIIOTransport.h"
 
 #include <thread>
 
@@ -77,3 +79,86 @@ TEST_CASE("Filter_ScalarStairstep_Stall")
 	exec.RunBlocking(nodes);
 	REQUIRE(stair->GetScalarValue(0) == second);
 }
+
+#ifdef HAS_IIO
+
+/**
+	@brief Sweeps the transmit LO of the simulated AD9361 with a stairstep
+ */
+TEST_CASE("Filter_ScalarStairstep_SDRTxLO")
+{
+	auto transport = dynamic_cast<SCPIIIOTransport*>(SCPITransport::CreateTransport("iio", "mock:ad9361"));
+	REQUIRE(transport != nullptr);
+	auto ctx = transport->GetContext();
+	REQUIRE(ctx != nullptr);
+	auto sdr = SCPISDR::CreateSDR("iio", transport);
+	REQUIRE(sdr != nullptr);
+	REQUIRE(sdr->GetTxChannelCount() == 2);
+
+	//Only the first transmit path has an LO input, since the LO is shared
+	size_t first = sdr->GetChannelCount() - sdr->GetTxChannelCount();
+	auto tx1 = dynamic_cast<SDRTransmitChannel*>(sdr->GetChannel(first));
+	auto tx2 = dynamic_cast<SDRTransmitChannel*>(sdr->GetChannel(first + 1));
+	REQUIRE(tx1 != nullptr);
+	REQUIRE(tx2 != nullptr);
+	REQUIRE(tx1->GetInputCount() == 1);
+	REQUIRE(tx2->GetInputCount() == 0);
+
+	//900 to 930 MHz in 10 MHz steps, one step every time the graph runs
+	auto stair = dynamic_cast<ScalarStairstepFilter*>(Filter::CreateFilter("Scalar Stairstep", "#ffffff"));
+	REQUIRE(stair != nullptr);
+	FilterReferencer ref(stair);
+	stair->GetParameter("Unit").SetIntVal(Unit::UNIT_HZ);
+	stair->GetParameter("Begin").SetFloatVal(900000000);
+	stair->GetParameter("End").SetFloatVal(930000000);
+	stair->GetParameter("Step count").SetIntVal(3);
+	stair->GetParameter("Step interval").SetIntVal(1);
+
+	//Only scalars can drive the LO, not waveforms
+	REQUIRE(!tx1->ValidateChannel(SDRTransmitChannel::INPUT_LO, StreamDescriptor(sdr->GetChannel(0), 0)));
+	REQUIRE(tx1->ValidateChannel(SDRTransmitChannel::INPUT_LO, StreamDescriptor(stair, 0)));
+	tx1->SetInput(SDRTransmitChannel::INPUT_LO, StreamDescriptor(stair, 0));
+
+	FilterGraphExecutor exec;
+	set<FlowGraphNode*> nodes;
+	nodes.emplace(stair);
+	nodes.emplace(tx1);
+
+	//Each run of the graph moves the LO to wherever the stairstep is, and the radio follows
+	set<int64_t> seen;
+	int64_t v;
+	for(size_t i=0; i<6; i++)
+	{
+		exec.RunBlocking(nodes);
+		int64_t lo = llround(stair->GetScalarValue(0));
+		REQUIRE(sdr->GetTxLOFrequency() == lo);
+		sdr->BackgroundProcessing();
+		REQUIRE(ctx->ReadChannelAttrInt("ad9361-phy", "altvoltage1", true, "frequency", v));
+		REQUIRE(v == lo);
+		seen.emplace(lo);
+	}
+	REQUIRE(seen == set<int64_t>{900000000, 910000000, 920000000, 930000000});
+
+	//The LO is only set when the input changes, so with the stairstep stopped a change made elsewhere sticks
+	stair->Stop();
+	sdr->SetTxLOFrequency(2400000000);
+	exec.RunBlocking(nodes);
+	REQUIRE(sdr->GetTxLOFrequency() == 2400000000);
+
+	//Reconnecting sends the input again, even though it hasn't changed
+	tx1->SetInput(SDRTransmitChannel::INPUT_LO, StreamDescriptor(nullptr, 0), true);
+	tx1->SetInput(SDRTransmitChannel::INPUT_LO, StreamDescriptor(stair, 0));
+	exec.RunBlocking(nodes);
+	REQUIRE(sdr->GetTxLOFrequency() == llround(stair->GetScalarValue(0)));
+
+	//Anything other than a frequency is ignored
+	stair->GetParameter("Unit").SetIntVal(Unit::UNIT_VOLTS);
+	stair->Run();
+	sdr->SetTxLOFrequency(2400000000);
+	exec.RunBlocking(nodes);
+	REQUIRE(sdr->GetTxLOFrequency() == 2400000000);
+
+	tx1->SetInput(SDRTransmitChannel::INPUT_LO, StreamDescriptor(nullptr, 0), true);
+}
+
+#endif

@@ -1525,13 +1525,21 @@ void StreamBrowserDialog::DoFrequencySettings(shared_ptr<Oscilloscope> scope)
 			p->m_txLoText = hz.PrettyPrintInt64WithResolution(txLo, 1);
 		}
 
-		if(renderEditableProperty(
-			width,
-			"TX LO",
-			p->m_txLoText,
-			p->m_txLo,
-			hz,
-			"Local oscillator frequency of the transmitters. This is shared by all transmit paths."))
+		//If the LO input of the first transmit path is connected in the filter graph, that's in control. Keep showing
+		//the value (which follows the input) but don't let it be edited, since the next update would overwrite it.
+		string loHelp = "Local oscillator frequency of the transmitters. This is shared by all transmit paths.";
+		auto txchan = dynamic_cast<SDRTransmitChannel*>(
+			sdr->GetChannel(sdr->GetChannelCount() - sdr->GetTxChannelCount()));
+		StreamDescriptor loIn;
+		if(txchan && (txchan->GetInputCount() > 0))
+			loIn = txchan->GetInput(SDRTransmitChannel::INPUT_LO);
+		bool driven = (loIn.m_channel != nullptr);
+		if(driven)
+			loHelp += "\n\nControlled by " + loIn.GetName() + " in the filter graph.";
+
+		//(help marker outside the disabled block, since a disabled one doesn't show its tooltip)
+		ImGui::BeginDisabled(driven);
+		if(renderEditableProperty(width, "TX LO", p->m_txLoText, p->m_txLo, hz))
 		{
 			sdr->SetTxLOFrequency(p->m_txLo);
 
@@ -1539,6 +1547,8 @@ void StreamBrowserDialog::DoFrequencySettings(shared_ptr<Oscilloscope> scope)
 			p->m_txLo = sdr->GetTxLOFrequency();
 			p->m_txLoText = hz.PrettyPrintInt64WithResolution(p->m_txLo, 1);
 		}
+		ImGui::EndDisabled();
+		HelpMarker(loHelp);
 	}
 }
 void StreamBrowserDialog::DoSpectrometerSettings(shared_ptr<SCPISpectrometer> spec)

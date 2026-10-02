@@ -2296,6 +2296,7 @@ void FilterGraphEditor::DoNodeForChannel(
 		if( (dynamic_cast<PowerSupplyChannel*>(channel)) ||
 			(dynamic_cast<FunctionGeneratorChannel*>(channel)) ||
 			(dynamic_cast<RFSignalGeneratorChannel*>(channel)) ||
+			(dynamic_cast<SDRTransmitChannel*>(channel)) ||
 			(dynamic_cast<DigitalOutputChannel*>(channel)) ||
 			(dynamic_cast<BERTOutputChannel*>(channel)) ||
 			(dynamic_cast<VIOOutputChannel*>(channel))
