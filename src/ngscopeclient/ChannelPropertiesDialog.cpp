@@ -473,6 +473,21 @@ bool ChannelPropertiesDialog::DoRender()
 					HelpMarker("Attenuation setting for the probe (for example, 10 for a 10:1 probe)");
 				}
 
+				//SDR signal strength, only read on request
+				if(sdr && sdr->HasRSSI(index))
+				{
+					bool rssi = sdr->IsRSSIEnabled(index);
+					if(ImGui::Checkbox("Read RSSI", &rssi))
+						sdr->SetRSSIEnabled(index, rssi);
+					HelpMarker(
+						"Read the received signal strength (RSSI) from the radio on every acquisition, into the rssi "
+						"stream of this channel. Drag that stream to the measurements to see it.\n\n"
+						"This takes a round trip to the radio for each acquisition, so it's off by default. "
+						"The value is in dB (0 to -128) referenced to the radio's input, "
+						"with the receive gain taken out. It isn't calibrated, so add an offset measured "
+						"with a known signal to get dBm.");
+				}
+
 				//Only show coupling box if the instrument has configurable coupling
 				if( (m_couplings.size() > 1) && (m_probe == "") )
 				{

@@ -98,6 +98,24 @@ static double ToneMagnitude(WaveformBase* iw, WaveformBase* qw, double freq)
 	return sqrt(re*re + im*im) / i->size();
 }
 
+/**
+	@brief Checks that a receive channel has the streams the driver creates (I, Q, center frequency, RSSI)
+ */
+static void CheckRXStreams(InstrumentChannel* chan)
+{
+	REQUIRE(chan->GetStreamCount() == 4);
+	REQUIRE(chan->GetType(0) == Stream::STREAM_TYPE_ANALOG);
+	REQUIRE(chan->GetType(1) == Stream::STREAM_TYPE_ANALOG);
+	REQUIRE(chan->GetType(2) == Stream::STREAM_TYPE_ANALOG_SCALAR);
+	REQUIRE(chan->GetType(3) == Stream::STREAM_TYPE_ANALOG_SCALAR);
+	REQUIRE((chan->GetYAxisUnits(0) == Unit(Unit::UNIT_VOLTS)));
+	REQUIRE((chan->GetYAxisUnits(1) == Unit(Unit::UNIT_VOLTS)));
+	REQUIRE((chan->GetYAxisUnits(2) == Unit(Unit::UNIT_HZ)));
+	REQUIRE((chan->GetYAxisUnits(3) == Unit(Unit::UNIT_DB)));
+	REQUIRE(chan->GetStreamName(2) == "center");
+	REQUIRE(chan->GetStreamName(3) == "rssi");
+}
+
 TEST_CASE("IIOSDR_Creation")
 {
 	IIOContext* ctx;
@@ -109,12 +127,17 @@ TEST_CASE("IIOSDR_Creation")
 	REQUIRE(sdr->GetTransportName() == "iio");
 	REQUIRE(sdr->GetTransportConnectionString() == "mock:ad9363");
 
-	//1R1T, so one complex RX channel with I, Q, and a center frequency scalar, then one transmit channel
+	//1R1T, so one complex RX channel with I, Q, center frequency and RSSI scalars, then one transmit channel
 	REQUIRE(sdr->GetChannelCount() == 2);
 	auto chan = dynamic_cast<ComplexChannel*>(sdr->GetChannel(0));
 	REQUIRE(chan != nullptr);
 	REQUIRE(chan->GetHwname() == "RX1");
-	REQUIRE(chan->GetStreamCount() == 3);
+	REQUIRE(chan->GetStreamCount() == 4);
+	REQUIRE(chan->GetStreamName(3) == "rssi");
+	REQUIRE(chan->GetType(3) == Stream::STREAM_TYPE_ANALOG_SCALAR);
+	REQUIRE((chan->GetYAxisUnits(3) == Unit(Unit::UNIT_DB)));
+	REQUIRE((chan->GetStreamFlags(3) & Stream::STREAM_INFREQUENTLY_USED) != 0);
+	REQUIRE(isnan(chan->GetScalarValue(3)));
 	REQUIRE(sdr->IsChannelEnabled(0));
 	auto txchan = dynamic_cast<SDRTransmitChannel*>(sdr->GetChannel(1));
 	REQUIRE(txchan != nullptr);
@@ -509,6 +532,54 @@ TEST_CASE("IIOSDR_TwoChannels")
 	REQUIRE(rx2 < 0.4);
 }
 
+TEST_CASE("IIOSDR_RSSI")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9361", ctx);
+	sdr->SetSampleDepth(4096);
+	sdr->EnableChannel(1);
+	auto rx1 = sdr->GetChannel(0);
+	auto rx2 = sdr->GetChannel(1);
+
+	//Both receive paths can read it, the transmit paths can't. Off by default.
+	REQUIRE(sdr->HasRSSI(0));
+	REQUIRE(sdr->HasRSSI(1));
+	REQUIRE(!sdr->HasRSSI(2));
+	REQUIRE(!sdr->IsRSSIEnabled(0));
+	REQUIRE(!sdr->IsRSSIEnabled(1));
+
+	//Nothing is read while it's off
+	sdr->StartSingleTrigger();
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	REQUIRE(isnan(rx1->GetScalarValue(3)));
+	REQUIRE(isnan(rx2->GetScalarValue(3)));
+
+	//Only read for the channel that asked for it. The mock reports "70.00 dB" like the real driver, which leaves off
+	//the sign, so we should see -70.
+	sdr->SetRSSIEnabled(1, true);
+	REQUIRE(!sdr->IsRSSIEnabled(0));
+	REQUIRE(sdr->IsRSSIEnabled(1));
+	sdr->StartSingleTrigger();
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	REQUIRE(isnan(rx1->GetScalarValue(3)));
+	REQUIRE(rx2->GetScalarValue(3) == -70);
+
+	//Turning it off clears the value on the next acquisition rather than leaving a stale one
+	sdr->SetRSSIEnabled(1, false);
+	sdr->StartSingleTrigger();
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	REQUIRE(isnan(rx2->GetScalarValue(3)));
+
+	//Out of range channels are ignored
+	sdr->SetRSSIEnabled(2, true);
+	REQUIRE(!sdr->IsRSSIEnabled(2));
+	sdr->SetRSSIEnabled(99, true);
+	REQUIRE(!sdr->IsRSSIEnabled(99));
+}
+
 TEST_CASE("IIOSDR_Gain")
 {
 	IIOContext* ctx;
@@ -651,6 +722,7 @@ TEST_CASE("IIOSDR_SessionRoundTrip")
 	sdr->SetGainMode(0, "hybrid");
 	sdr->SetGainMode(1, "manual");
 	sdr->SetGain(1, 33);
+	sdr->SetRSSIEnabled(1, true);
 	sdr->BackgroundProcessing();
 
 	IDTable table;
@@ -676,20 +748,12 @@ TEST_CASE("IIOSDR_SessionRoundTrip")
 	REQUIRE(sdr2->GetGainMode(0) == "hybrid");
 	REQUIRE(sdr2->GetGainMode(1) == "manual");
 	REQUIRE(sdr2->GetGain(1) == 33);
+	REQUIRE(!sdr2->IsRSSIEnabled(0));
+	REQUIRE(sdr2->IsRSSIEnabled(1));
 
 	//Loading a session must not change what kind of streams the channels have
 	for(size_t i=0; i<2; i++)
-	{
-		auto chan = sdr2->GetChannel(i);
-		REQUIRE(chan->GetStreamCount() == 3);
-		REQUIRE(chan->GetType(0) == Stream::STREAM_TYPE_ANALOG);
-		REQUIRE(chan->GetType(1) == Stream::STREAM_TYPE_ANALOG);
-		REQUIRE(chan->GetType(2) == Stream::STREAM_TYPE_ANALOG_SCALAR);
-		REQUIRE((chan->GetYAxisUnits(0) == Unit(Unit::UNIT_VOLTS)));
-		REQUIRE((chan->GetYAxisUnits(1) == Unit(Unit::UNIT_VOLTS)));
-		REQUIRE((chan->GetYAxisUnits(2) == Unit(Unit::UNIT_HZ)));
-		REQUIRE(chan->GetStreamName(2) == "center");
-	}
+		CheckRXStreams(sdr2->GetChannel(i));
 
 	//And it all made it to the radio
 	int64_t v;
@@ -701,6 +765,33 @@ TEST_CASE("IIOSDR_SessionRoundTrip")
 	REQUIRE(ctx2->ReadChannelAttrDouble(phy, "voltage1", false, "hardwaregain", gain));
 	REQUIRE(gain == 33);
 	REQUIRE(!sdr2->IsSweepEnabled());
+}
+
+TEST_CASE("IIOSDR_SessionFromBeforeRSSI")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9363", ctx);
+	sdr->SetCenterFrequency(0, 915000000);
+	sdr->BackgroundProcessing();
+
+	//Make it look like a session saved before the RSSI stream existed
+	IDTable table;
+	auto node = sdr->SerializeConfiguration(table);
+	auto cnode = node["channels"]["ch0"];
+	REQUIRE(cnode["nstreams"].as<size_t>() == 4);
+	cnode["nstreams"] = 3;
+	cnode["streams"].remove("stream3");
+	cnode.remove("rssi");
+
+	//Loading it must keep the streams the driver has, not rebuild them all as the type of the first one
+	IIOContext* ctx2;
+	auto sdr2 = MakeSDR("mock:ad9363", ctx2);
+	IDTable idmap;
+	sdr2->LoadConfiguration(2, node, idmap);
+	sdr2->BackgroundProcessing();
+	REQUIRE(sdr2->GetCenterFrequency(0) == 915000000);
+	REQUIRE(!sdr2->IsRSSIEnabled(0));
+	CheckRXStreams(sdr2->GetChannel(0));
 }
 
 TEST_CASE("IIOSDR_SessionRoundTripSweep")
