@@ -284,6 +284,7 @@ TEST_CASE("Filter_SpectrumStitch_IIOSDR")
 	sdr->SetSampleDepth(depth);
 	sdr->SetSampleRate(20000000);
 	sdr->SetCenterFrequency(0, center);
+	sdr->SetSweepEnabled(true);
 	sdr->SetSpan(span);
 	sdr->BackgroundProcessing();
 

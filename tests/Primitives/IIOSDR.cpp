@@ -323,11 +323,19 @@ TEST_CASE("IIOSDR_Sweep")
 	auto chan = sdr->GetChannel(0);
 	int64_t v;
 
-	//The AD9363 can capture 20 MHz at once, so a 60 MHz span has to be swept
+	//Sweeping is off by default, so the span is limited to what the AD9363 can capture at once (20 MHz)
 	const size_t depth = 4096;
 	sdr->SetSampleDepth(depth);
 	sdr->SetSampleRate(20000000);
 	sdr->SetCenterFrequency(0, 2420000000);
+	REQUIRE(sdr->CanSweep());
+	REQUIRE(!sdr->IsSweepEnabled());
+	sdr->SetSpan(60000000);
+	REQUIRE(sdr->GetSpan() == 20000000);
+
+	//With sweeping on, a 60 MHz span has to be swept
+	sdr->SetSweepEnabled(true);
+	REQUIRE(sdr->IsSweepEnabled());
 	sdr->SetSpan(60000000);
 	REQUIRE(sdr->GetSpan() == 60000000);
 	sdr->BackgroundProcessing();
@@ -428,6 +436,24 @@ TEST_CASE("IIOSDR_Sweep")
 	}
 	REQUIRE(!sdr->IsTriggerArmed());
 	REQUIRE(fabs(last - 3800000000.0) < 256);
+
+	//Turning sweeping off cuts the span down to one capture, and the LO goes back to the center
+	sdr->SetSweepEnabled(false);
+	REQUIRE(sdr->GetSpan() == 20000000);
+	sdr->BackgroundProcessing();
+	REQUIRE(ctx->ReadChannelAttrInt(phy, "altvoltage0", true, "frequency", v));
+	REQUIRE(v == 3800000000);
+	REQUIRE(ctx->ReadChannelAttrInt(phy, "voltage0", false, "rf_bandwidth", v));
+	REQUIRE(v == 20000000);
+
+	//Without sweeping, a span wider than the sample rate still isn't swept
+	sdr->SetSampleRate(5000000);
+	sdr->BackgroundProcessing();
+	sdr->StartSingleTrigger();
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	REQUIRE(!sdr->IsTriggerArmed());
+	REQUIRE(fabs(chan->GetScalarValue(2) - 3800000000.0) < 256);
 }
 
 TEST_CASE("IIOSDR_ContinuousAndDisabledChannels")
@@ -674,6 +700,34 @@ TEST_CASE("IIOSDR_SessionRoundTrip")
 	REQUIRE(v == 5000000);
 	REQUIRE(ctx2->ReadChannelAttrDouble(phy, "voltage1", false, "hardwaregain", gain));
 	REQUIRE(gain == 33);
+	REQUIRE(!sdr2->IsSweepEnabled());
+}
+
+TEST_CASE("IIOSDR_SessionRoundTripSweep")
+{
+	//A swept span wider than one capture has to survive loading, even though the span is restored before sweeping
+	//is turned back on
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9361", ctx);
+	sdr->SetSweepEnabled(true);
+	sdr->SetCenterFrequency(0, 2420000000);
+	sdr->SetSpan(200000000);
+	sdr->BackgroundProcessing();
+
+	IDTable table;
+	auto node = sdr->SerializeConfiguration(table);
+	REQUIRE(node["sweep"].as<bool>());
+
+	IIOContext* ctx2;
+	auto sdr2 = MakeSDR("mock:ad9361", ctx2);
+	REQUIRE(!sdr2->IsSweepEnabled());
+	IDTable idmap;
+	sdr2->LoadConfiguration(2, node, idmap);
+	sdr2->BackgroundProcessing();
+
+	REQUIRE(sdr2->IsSweepEnabled());
+	REQUIRE(sdr2->GetCenterFrequency(0) == 2420000000);
+	REQUIRE(sdr2->GetSpan() == 200000000);
 }
 
 TEST_CASE("IIOSDR_Scan")

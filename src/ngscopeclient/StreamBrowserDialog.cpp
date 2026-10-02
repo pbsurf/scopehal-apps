@@ -1479,6 +1479,24 @@ void StreamBrowserDialog::DoFrequencySettings(shared_ptr<Oscilloscope> scope)
 		changed = true;
 	}
 
+	//Sweeping, if the radio can do it. Turning it off can cut down the span.
+	auto sdr = dynamic_pointer_cast<SCPISDR>(scope);
+	if(sdr && sdr->CanSweep())
+	{
+		bool sweep = sdr->IsSweepEnabled();
+		ImGui::SetNextItemWidth(width);
+		if(renderOnOffToggle("Sweep", false, sweep))
+		{
+			sdr->SetSweepEnabled(sweep);
+			changed = true;
+		}
+		HelpMarker(
+			"Sweep the LO across spans wider than the radio can capture at once, one capture per step.\n"
+			"\n"
+			"Use the Spectrum Stitch filter on the output of a Complex FFT to put the captures together. "
+			"When this is off, the span is limited to what can be captured at once.");
+	}
+
 	//Update everything if one setting is changed
 	if(changed)
 	{
@@ -1494,7 +1512,6 @@ void StreamBrowserDialog::DoFrequencySettings(shared_ptr<Oscilloscope> scope)
 	}
 
 	//Transmit LO, if we have a transmitter (it's shared by all transmit paths)
-	auto sdr = dynamic_pointer_cast<SCPISDR>(scope);
 	if(sdr && (sdr->GetTxChannelCount() > 0))
 	{
 		//Check if it changed under us
