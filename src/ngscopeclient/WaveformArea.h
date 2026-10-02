@@ -729,6 +729,8 @@ protected:
 	void DragYAxisBy(float dy);
 	void CommitYAxisDrag();
 	bool CanPanVertically();
+	bool CanPanVerticallyInPlot();
+	bool YAxisControlsInstrument();
 	bool CanZoomByDragging();
 	void ApplyZoomBox();
 	void OnPinchZoom(float delta, float delta_h);

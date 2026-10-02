@@ -877,8 +877,9 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 			if((wheel != 0) || (wheel_h != 0))
 			{
 				//Touchscreen wheel events are pinch zoom (see imgui_impl_sdl2.cpp)
+				//(vertical pinch zooms the Y axis only if that doesn't reconfigure the instrument)
 				if(ImGui::GetIO().MouseSource == ImGuiMouseSource_TouchScreen)
-					OnPinchZoom(wheel, wheel_h);
+					OnPinchZoom(CanPanVerticallyInPlot() ? wheel : 0, wheel_h);
 				else
 					OnMouseWheelPlotArea(wheel, wheel_h);
 			}
@@ -967,14 +968,16 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 		if( (m_dragState == DRAG_STATE_ZOOM_BOX) ||
 			( (m_dragState == DRAG_STATE_NONE) && ImGui::IsKeyDown(ImGuiMod_Ctrl) && CanZoomByDragging() ) )
 		{
-			m_parent->AddStatusHelp("mouse_lmb_drag", "Zoom to box");
+			m_parent->AddStatusHelp(
+				"mouse_lmb_drag",
+				CanPanVerticallyInPlot() ? "Zoom to box" : "Zoom horizontal axis to box");
 		}
 		else if(m_dragState == DRAG_STATE_TAP_ZOOM)
 			m_parent->AddStatusHelp("mouse_lmb_drag", "Drag down to zoom in, up to zoom out");
 		else if( (m_dragState == DRAG_STATE_PAN) ||
 			( (m_dragState == DRAG_STATE_NONE) && (m_yAxisCursorMode == Y_CURSOR_NONE) && m_group->CanPanByDragging() ) )
 		{
-			m_parent->AddStatusHelp("mouse_lmb_drag", "Pan");
+			m_parent->AddStatusHelp("mouse_lmb_drag", CanPanVerticallyInPlot() ? "Pan" : "Pan horizontally");
 		}
 	}
 
@@ -5162,7 +5165,7 @@ void WaveformArea::ApplyZoomBox()
 	//Ignore accidental drags
 	float minSize = ImGui::GetFontSize() * 0.5f;
 	bool zoomX = (right - left) >= minSize;
-	bool zoomY = ((bottom - top) >= minSize) && CanPanVertically();
+	bool zoomY = ((bottom - top) >= minSize) && CanPanVerticallyInPlot();
 	if(!zoomX && !zoomY)
 		return;
 
@@ -5205,6 +5208,37 @@ bool WaveformArea::CanPanVertically()
 	return static_cast<bool>(GetFirstAnalogOrDensityStream());
 }
 
+/**
+	@brief Returns true if pan and zoom gestures in the plot area may move the Y axis
+
+	Moving the Y axis of an instrument channel changes the instrument's offset and range settings, which can be slow
+	or disruptive, so that is only done from the Y axis itself. Plot area gestures move only the X axis in that case.
+ */
+bool WaveformArea::CanPanVerticallyInPlot()
+{
+	return CanPanVertically() && !YAxisControlsInstrument();
+}
+
+/**
+	@brief Returns true if any analog stream in this area comes from an instrument channel (not a filter)
+
+	Since all streams in an area share the Y axis, changing it changes the offset and range of that instrument channel.
+ */
+bool WaveformArea::YAxisControlsInstrument()
+{
+	for(auto& c : m_inputs)
+	{
+		auto& stream = c->m_sourceStream;
+		if(stream.GetType() != Stream::STREAM_TYPE_ANALOG)
+			continue;
+
+		auto chan = dynamic_cast<OscilloscopeChannel*>(stream.m_channel);
+		if(chan && !dynamic_cast<Filter*>(chan) && chan->GetScope())
+			return true;
+	}
+	return false;
+}
+
 void WaveformArea::OnDragUpdate()
 {
 	//If mouse is not currently down, but we're still dragging, synthesize a mouse up event
@@ -5240,7 +5274,7 @@ void WaveformArea::OnDragUpdate()
 				}
 
 				//Vertical pan is the same as dragging the Y axis
-				if( (delta.y != 0) && CanPanVertically() )
+				if( (delta.y != 0) && CanPanVerticallyInPlot() )
 				{
 					DragYAxisBy(delta.y);
 					m_panDraggedY = true;
