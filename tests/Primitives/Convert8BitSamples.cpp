@@ -80,7 +80,8 @@ TEST_CASE("Primitive_Convert8BitSamples")
 	data_out_golden.resize(wavelen);
 
 	uniform_real_distribution<float> gaindesc(0, 1);
-	uniform_int_distribution<int8_t> indesc(-128, 127);
+	//8-bit types aren't allowed as the template argument (MSVC enforces this), so generate ints and narrow them
+	uniform_int_distribution<int> indesc(-128, 127);
 	uniform_real_distribution<float> offdesc(-10, 10);
 
 	unique_ptr<ComputePipeline> pipe = make_unique<ComputePipeline>(
@@ -102,7 +103,7 @@ TEST_CASE("Primitive_Convert8BitSamples")
 			float off = offdesc(g_rng);
 			data_in.PrepareForCpuAccess();
 			for(size_t j=0; j<wavelen; j++)
-				data_in[j] = indesc(g_rng);
+				data_in[j] = static_cast<int8_t>(indesc(g_rng));
 			data_in.MarkModifiedFromCpu();
 			data_in.PrepareForGpuAccess();
 

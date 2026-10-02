@@ -46,10 +46,11 @@
 
 using namespace std;
 
-float sinc(float x, float width);
-float blackman(float x, float width);
+//Static, since UpsampleFilter.cpp has its own (which clash when scopeprotocols is a static library, as on MSVC)
+static float sinc(float x, float width);
+static float blackman(float x, float width);
 
-float sinc(float x, float width)
+static float sinc(float x, float width)
 {
 	float xi = x - width/2;
 
@@ -62,7 +63,7 @@ float sinc(float x, float width)
 	}
 }
 
-float blackman(float x, float width)
+static float blackman(float x, float width)
 {
 	if(x > width)
 		return 0;
