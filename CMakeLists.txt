@@ -95,6 +95,17 @@ if(Git_FOUND OR NGSCOPECLIENT_PACKAGE_VERSION)
 	elseif(NGSCOPECLIENT_VERSION_LONG MATCHES "v([0-9]*).([0-9]*).([0-9]*)-([0-9]*)")
 		set(MSI_VERSION "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}9.${CMAKE_MATCH_4}")
 
+	# No release tag in the history (e.g. a fork or clone without tags, or not a git checkout at all).
+	# Fine for development builds, so only release versions passed in from outside must parse.
+	elseif(NOT NGSCOPECLIENT_PACKAGE_VERSION AND NOT NGSCOPECLIENT_PACKAGE_VERSION_LONG)
+		if(NGSCOPECLIENT_VERSION)
+			set(NGSCOPECLIENT_VERSION "unknown-${NGSCOPECLIENT_VERSION}")
+		else()
+			set(NGSCOPECLIENT_VERSION "unknown")
+		endif()
+		set(MSI_VERSION "0.2")
+		message("No release tag found, scopehal-apps version ${NGSCOPECLIENT_VERSION}")
+
 	# No release matched
 	else()
 		message(FATAL_ERROR "Unrecognized version tag ${NGSCOPECLIENT_VERSION} / ${NGSCOPECLIENT_VERSION_LONG}, can't create a VERSIONINFO from it. Must be of format v1.2, v1.2.3, v1.2-rc3, v1.2.3-rc4")
