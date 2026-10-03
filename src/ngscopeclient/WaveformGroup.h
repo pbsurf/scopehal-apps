@@ -226,7 +226,7 @@ protected:
 	void DoCursor(int iCursor, DragState state);
 
 	int64_t GetRoundingDivisor(int64_t width_xunits);
-	void OnMouseWheel(float delta);
+	void OnMouseWheel(float delta, float delta_h);
 	void ClampXAxisOffset();
 
 	///@brief Top level window we're attached to

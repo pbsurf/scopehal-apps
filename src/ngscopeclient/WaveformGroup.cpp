@@ -1077,12 +1077,21 @@ void WaveformGroup::RenderTimeline(float width, float height)
 		m_tLastMouseMove = tnow;
 
 	ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
+	ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelX);
 	if(ImGui::IsItemHovered())
 	{
 		//Catch mouse wheel events
 		auto wheel = ImGui::GetIO().MouseWheel;
-		if(wheel != 0)
-			OnMouseWheel(wheel);
+		auto wheel_h = ImGui::GetIO().MouseWheelH;
+		if((wheel != 0) || (wheel_h != 0))
+		{
+			//Touchscreen wheel events are pinch zoom (see imgui_impl_sdl2.cpp), which zooms in either orientation
+			//since the timeline only has an X axis
+			if(ImGui::GetIO().MouseSource == ImGuiMouseSource_TouchScreen)
+				OnMouseWheel(wheel + wheel_h, 0);
+			else
+				OnMouseWheel(wheel, wheel_h);
+		}
 
 		//Autoscale on middle mouse, or double click / double tap if there's no middle button
 		//(checked before drag start, so the second click of a double click doesn't begin a drag)
@@ -1388,9 +1397,14 @@ void WaveformGroup::RenderTriggerPositionArrows(ImVec2 pos, float height)
 }
 
 /**
-	@brief Handles a mouse wheel scroll step
+	@brief Handles a mouse wheel scroll step on the timeline
+
+	Vertical scrolling zooms and horizontal scrolling (or Shift with vertical scrolling) pans, as on the plot area.
+
+	@param delta	Vertical scroll steps
+	@param delta_h	Horizontal scroll steps
  */
-void WaveformGroup::OnMouseWheel(float delta)
+void WaveformGroup::OnMouseWheel(float delta, float delta_h)
 {
 	auto areas = GetWaveformAreas();
 
@@ -1402,7 +1416,18 @@ void WaveformGroup::OnMouseWheel(float delta)
 			return;
 	}
 
-	//TODO: if shift is held, scroll horizontally
+	if(ImGui::IsKeyDown(ImGuiMod_Shift))
+	{
+		delta_h += delta;
+		delta = 0;
+	}
+
+	//If we have both X and Y deltas, use the larger one and ignore incidental movement in the other axis
+	if(fabs(delta_h) >= fabs(delta))
+	{
+		OnPanHorizontal(delta_h);
+		return;
+	}
 
 	int64_t target = XPositionToXAxisUnits(ImGui::GetIO().MousePos.x);
 
