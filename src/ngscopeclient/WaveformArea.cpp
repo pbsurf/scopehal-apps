@@ -372,6 +372,7 @@ WaveformArea::WaveformArea(StreamDescriptor stream, shared_ptr<WaveformGroup> gr
 	, m_tapZoomAnchor(0)
 	, m_tapZoomStartScale(0)
 	, m_tapZoomActive(false)
+	, m_snapZoomWheel(0)
 	, m_group(group)
 	, m_parent(parent)
 	, m_tLastMouseMove(GetTime())
@@ -964,7 +965,10 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 	//Handle help messages
 	if(ImGui::IsItemHovered() && !m_mouseOverButton)
 	{
-		m_parent->AddStatusHelp("mouse_wheel", "Zoom horizontal axis");
+		if(ImGui::IsKeyDown(ImGuiMod_Ctrl))
+			m_parent->AddStatusHelp("mouse_wheel", "Zoom horizontal axis in 1-2-5 steps per division");
+		else
+			m_parent->AddStatusHelp("mouse_wheel", "Zoom horizontal axis");
 		if( (m_dragState == DRAG_STATE_ZOOM_BOX) ||
 			( (m_dragState == DRAG_STATE_NONE) && ImGui::IsKeyDown(ImGuiMod_Ctrl) && CanZoomByDragging() ) )
 		{
@@ -3747,7 +3751,10 @@ void WaveformArea::RenderYAxis(ImVec2 size, map<float, float>& gridmap, float vb
 		{
 			m_parent->AddStatusHelp("mouse_lmb_drag", "Adjust offset");
 			m_parent->AddStatusHelp("mouse_mmb", "Autofit range and offset");
-			m_parent->AddStatusHelp("mouse_wheel", "Adjust range");
+			if(ImGui::IsKeyDown(ImGuiMod_Ctrl))
+				m_parent->AddStatusHelp("mouse_wheel", "Adjust range in 1-2-5 steps per division");
+			else
+				m_parent->AddStatusHelp("mouse_wheel", "Adjust range");
 		}
 	}
 
@@ -5651,25 +5658,18 @@ void WaveformArea::OnMouseWheelPlotArea(float delta, float delta_h)
 	//If we have both X and Y deltas, use the larger one and ignore incidental movement in the other axis
 	if(fabs(delta) > fabs(delta_h) )
 	{
-		//Zoom in
-		if(delta > 0)
-		{
+		//Ctrl steps through 1-2-5 scales, otherwise zoom around the mouse
+		if(ImGui::IsKeyDown(ImGuiMod_Ctrl))
+			m_group->OnZoomHorizontalSnapped(delta);
+		else if(delta > 0)
 			m_group->OnZoomInHorizontal(target, pow(1.5, delta));
-
-			//If in the tutorial, ungate the wizard
-			auto tutorial = m_parent->GetTutorialWizard();
-			if(tutorial && (tutorial->GetCurrentStep() == TutorialWizard::TUTORIAL_04_SCROLLZOOM) )
-				tutorial->EnableNextStep();
-		}
-		else if (delta < 0)
-		{
+		else
 			m_group->OnZoomOutHorizontal(target, pow(1.5, -delta));
 
-			//If in the tutorial, ungate the wizard
-			auto tutorial = m_parent->GetTutorialWizard();
-			if(tutorial && (tutorial->GetCurrentStep() == TutorialWizard::TUTORIAL_04_SCROLLZOOM) )
-				tutorial->EnableNextStep();
-		}
+		//If in the tutorial, ungate the wizard
+		auto tutorial = m_parent->GetTutorialWizard();
+		if(tutorial && (tutorial->GetCurrentStep() == TutorialWizard::TUTORIAL_04_SCROLLZOOM) )
+			tutorial->EnableNextStep();
 	}
 
 	//Pan horizontally
@@ -5739,6 +5739,13 @@ void WaveformArea::OnTapZoomDrag()
 
 /**
 	@brief Handles a mouse wheel scroll step on the Y axis
+
+	With Ctrl held, the range steps through the 1-2-5 sequence like the V/div knob of a scope, with the plot treated as
+	10 divisions high (e.g. 100 mV/div, 200 mV/div, 500 mV/div...). Fractions of a step (e.g. from touchpads) add up
+	until there's a whole step.
+
+	@param delta	Mouse wheel steps (positive zooms in)
+	@param zoomBase	Factor the range is multiplied by for each step in, when not snapping to 1-2-5 steps
  */
 void WaveformArea::OnMouseWheelYAxis(float delta, float zoomBase)
 {
@@ -5757,22 +5764,25 @@ void WaveformArea::OnMouseWheelYAxis(float delta, float zoomBase)
 
 	stream = GetFirstAnalogOrDensityStream();
 
-	if(delta > 0)
+	auto range = stream.GetVoltageRange();
+	if(ImGui::IsKeyDown(ImGuiMod_Ctrl))
 	{
-		auto range = stream.GetVoltageRange();
-		range *= pow(zoomBase, delta);
+		m_snapZoomWheel += delta;
+		int steps = trunc(m_snapZoomWheel);
+		m_snapZoomWheel -= steps;
+		if( (steps == 0) || (range <= 0) )
+			return;
 
-		for(size_t i=0; i<m_inputs.size(); i++)
-			m_inputs[i]->m_sourceStream.SetVoltageRange(range);
+		//Zooming in is fewer volts per division
+		range = 10 * Step125(range / 10, -steps);
 	}
+	else if(delta > 0)
+		range *= pow(zoomBase, delta);
 	else
-	{
-		auto range = stream.GetVoltageRange();
 		range /= pow(zoomBase, -delta);
 
-		for(size_t i=0; i<m_inputs.size(); i++)
-			m_inputs[i]->m_sourceStream.SetVoltageRange(range);
-	}
+	for(size_t i=0; i<m_inputs.size(); i++)
+		m_inputs[i]->m_sourceStream.SetVoltageRange(range);
 
 	ClearPersistence();
 	m_parent->SetNeedRender();

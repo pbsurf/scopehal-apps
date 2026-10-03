@@ -722,6 +722,9 @@ protected:
 	///@brief True once a double tap zoom has moved far enough vertically to start zooming
 	bool m_tapZoomActive;
 
+	///@brief Mouse wheel motion on the Y axis not yet used by a 1-2-5 range step (less than one step)
+	float m_snapZoomWheel;
+
 	///@brief The stream currently being dragged (invalid if m_dragState != DRAG_STATE_CHANNEL)
 	StreamDescriptor m_dragStream;
 

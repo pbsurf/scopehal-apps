@@ -581,3 +581,42 @@ bool IsColorDark(ImU32 bgColor)
 	else
 		return true;
 }
+
+/**
+	@brief Steps a positive value along the 1-2-5 sequence (..., 0.5, 1, 2, 5, 10, 20, ...) used by scope knobs
+
+	A value that isn't in the sequence goes to the nearest value in the sequence in the direction of the step, so the
+	first step from a scale that was set some other way snaps it to the sequence.
+
+	@param value	Current value (must be positive)
+	@param steps	Number of steps: positive for larger values, negative for smaller
+ */
+double Step125(double value, int steps)
+{
+	static const double mantissas[3] = {1, 2, 5};
+	const double epsilon = 1e-6;
+
+	//Find the index of the largest value in the sequence that's not above ours (three per decade)
+	int exp = floor(log10(value));
+	double mant = value / pow(10, exp) * (1 + epsilon);
+	if(mant >= 10)
+	{
+		exp ++;
+		mant /= 10;
+	}
+	int index = 3*exp;
+	if(mant >= 5)
+		index += 2;
+	else if(mant >= 2)
+		index += 1;
+
+	//If we're between two values, the next one down is the first step down
+	double below = mantissas[index - 3*exp] * pow(10, exp);
+	if( (steps < 0) && (fabs(value/below - 1) > epsilon) )
+		steps ++;
+	index += steps;
+
+	//Floor division, so negative indexes (values below 1) work too
+	exp = (index >= 0) ? (index / 3) : -((2 - index) / 3);
+	return mantissas[index - 3*exp] * pow(10, exp);
+}

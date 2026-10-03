@@ -140,4 +140,6 @@ bool RectContains(ImVec2 posA, ImVec2 sizeA, ImVec2 posB, ImVec2 sizeB);
 ImU32 GetTextColor(ImU32 bgColor);
 bool IsColorDark(ImU32 bgColor);
 
+double Step125(double value, int steps);
+
 #endif

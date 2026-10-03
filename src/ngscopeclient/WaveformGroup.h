@@ -78,6 +78,7 @@ public:
 	void OnZoomInHorizontal(int64_t target, float step);
 	void OnZoomOutHorizontal(int64_t target, float step);
 	void OnPanHorizontal(float step);
+	void OnZoomHorizontalSnapped(float delta);
 	void OnPanPixels(float dx);
 	void NavigateToTimestamp(
 		int64_t timestamp,
@@ -242,6 +243,9 @@ protected:
 
 	///@brief X axis position of the left edge of our view
 	int64_t m_xAxisOffset;
+
+	///@brief Mouse wheel motion not yet used by OnZoomHorizontalSnapped() (less than one step)
+	float m_snapZoomWheel;
 
 	///@brief Display title of the group
 	std::string m_title;

@@ -51,6 +51,7 @@ WaveformGroup::WaveformGroup(MainWindow* parent, const string& title)
 	, m_width(0)
 	, m_pixelsPerXUnit(0.00005)
 	, m_xAxisOffset(0)
+	, m_snapZoomWheel(0)
 	, m_title(title)
 	, m_id(title)
 	, m_xAxisUnit(Unit::UNIT_FS)
@@ -1251,7 +1252,10 @@ void WaveformGroup::RenderTimeline(float width, float height)
 		else
 			m_parent->AddStatusHelp("mouse_lmb_drag", "Pan timeline");
 
-		m_parent->AddStatusHelp("mouse_wheel", "Zoom horizontal axis");
+		if(ImGui::IsKeyDown(ImGuiMod_Ctrl))
+			m_parent->AddStatusHelp("mouse_wheel", "Zoom horizontal axis in 1-2-5 steps per division");
+		else
+			m_parent->AddStatusHelp("mouse_wheel", "Zoom horizontal axis");
 		m_parent->AddStatusHelp("mouse_mmb", "Autoscale horizontal axis to waveforms");
 	}
 
@@ -1402,8 +1406,10 @@ void WaveformGroup::OnMouseWheel(float delta)
 
 	int64_t target = XPositionToXAxisUnits(ImGui::GetIO().MousePos.x);
 
-	//Zoom in
-	if(delta > 0)
+	//Ctrl steps through 1-2-5 scales, otherwise zoom around the mouse
+	if(ImGui::IsKeyDown(ImGuiMod_Ctrl))
+		OnZoomHorizontalSnapped(delta);
+	else if(delta > 0)
 		OnZoomInHorizontal(target, pow(1.5, delta));
 	else
 		OnZoomOutHorizontal(target, pow(1.5, -delta));
@@ -1520,6 +1526,37 @@ void WaveformGroup::OnPanHorizontal(float step)
 	ClampXAxisOffset();
 
 	ClearPersistence();
+}
+
+/**
+	@brief Zooms the horizontal axis to the next scale in the 1-2-5 sequence, like the timebase knob of a scope
+
+	The plot is treated as 10 divisions wide (e.g. 100 ns/div, 200 ns/div, 500 ns/div...) and zoomed around its
+	center, regardless of the mouse position.
+
+	@param delta	Mouse wheel steps (positive zooms in). Fractions of a step (e.g. from touchpads) add up until there's a
+					whole step.
+ */
+void WaveformGroup::OnZoomHorizontalSnapped(float delta)
+{
+	m_snapZoomWheel += delta;
+	int steps = trunc(m_snapZoomWheel);
+	m_snapZoomWheel -= steps;
+	if(steps == 0)
+		return;
+
+	float plotWidth = m_width - GetYAxisWidth() - GetSpacing();
+	if( (plotWidth <= 0) || (m_pixelsPerXUnit <= 0) )
+		return;
+
+	//Zooming in is fewer X axis units per division
+	double unitsPerDiv = Step125(plotWidth / (10 * m_pixelsPerXUnit), -steps);
+
+	//X axis units are integers (e.g. fs), so don't go below one per division
+	unitsPerDiv = max(unitsPerDiv, 1.0);
+
+	float center = m_xpos + plotWidth/2;
+	ZoomHorizontalAround(XPositionToXAxisUnits(center), center, plotWidth / (10 * unitsPerDiv));
 }
 
 /**
