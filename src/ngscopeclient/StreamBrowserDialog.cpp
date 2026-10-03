@@ -2301,7 +2301,13 @@ void StreamBrowserDialog::renderStreamNode(
 	// Stream name
 	if (renderName)
 	{
+		//Streams with their own color show it, the rest go with the channel name above them
+		bool streamColor = channel->HasStreamDisplayColor(streamIndex);
+		if(streamColor)
+			ImGui::PushStyleColor(ImGuiCol_Text, ColorFromString(channel->GetStreamDisplayColor(streamIndex)));
 		ImGui::Selectable(channel->GetStreamName(streamIndex).c_str());
+		if(streamColor)
+			ImGui::PopStyleColor();
 		StreamDescriptor s(channel, streamIndex);
 		if(ImGui::BeginDragDropSource())
 		{

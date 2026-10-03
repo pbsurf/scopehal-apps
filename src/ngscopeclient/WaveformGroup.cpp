@@ -477,7 +477,7 @@ void WaveformGroup::DoCursorReadouts()
 
 					//Channel name
 					ImGui::TableSetColumnIndex(0);
-					auto color = ColorFromString(stream.m_channel->m_displaycolor);
+					auto color = ColorFromString(stream.GetDisplayColor());
 					ImGui::PushStyleColor(ImGuiCol_Text, color);
 					ImGui::TextUnformatted(sname.c_str());
 					ImGui::PopStyleColor();
@@ -1318,7 +1318,7 @@ void WaveformGroup::RenderTriggerPositionArrows(ImVec2 pos, float height)
 			xpos = mouse.x;
 
 		//Draw the arrow
-		auto color = ColorFromString(din.m_channel->m_displaycolor);
+		auto color = ColorFromString(din.GetDisplayColor());
 		float aleft = xpos - arrowsize/2;
 		float aright = xpos + arrowsize/2;
 		draw_list->AddTriangleFilled(

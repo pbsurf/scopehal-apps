@@ -316,6 +316,68 @@ bool ChannelPropertiesDialog::DoRender()
 			//If color is changed, request a re-render
 			m_parent->SetNeedRender();
 		}
+
+		//Channels with several waveform streams (e.g. I/Q) can give each stream its own color
+		vector<size_t> traceStreams;
+		for(size_t i=0; i<chan->GetStreamCount(); i++)
+		{
+			switch(chan->GetType(i))
+			{
+				case Stream::STREAM_TYPE_ANALOG_SCALAR:
+				case Stream::STREAM_TYPE_DIGITAL_SCALAR:
+				case Stream::STREAM_TYPE_TRIGGER:
+					break;
+
+				default:
+					traceStreams.push_back(i);
+					break;
+			}
+		}
+		if(traceStreams.size() > 1)
+		{
+			HelpMarker("Color of streams which don't have their own color below");
+
+			for(auto i : traceStreams)
+			{
+				ImGui::PushID(static_cast<int>(i));
+
+				auto scolor = ColorFromString(chan->GetStreamDisplayColor(i));
+				float rgb[3] =
+				{
+					((scolor >> IM_COL32_R_SHIFT) & 0xff) / 255.0f,
+					((scolor >> IM_COL32_G_SHIFT) & 0xff) / 255.0f,
+					((scolor >> IM_COL32_B_SHIFT) & 0xff) / 255.0f
+				};
+
+				string label = chan->GetStreamName(i) + " color";
+				if(ImGui::ColorEdit3(
+					label.c_str(),
+					rgb,
+					ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_InputRGB | ImGuiColorEditFlags_Uint8))
+				{
+					char tmp[32];
+					snprintf(tmp, sizeof(tmp), "#%02x%02x%02x",
+						static_cast<int>(round(rgb[0] * 255)),
+						static_cast<int>(round(rgb[1] * 255)),
+						static_cast<int>(round(rgb[2] * 255)));
+					chan->SetStreamDisplayColor(i, tmp);
+					m_parent->SetNeedRender();
+				}
+
+				//Go back to the channel color
+				if(chan->HasStreamDisplayColor(i))
+				{
+					ImGui::SameLine();
+					if(ImGui::SmallButton("Reset"))
+					{
+						chan->SetStreamDisplayColor(i, "");
+						m_parent->SetNeedRender();
+					}
+				}
+
+				ImGui::PopID();
+			}
+		}
 	}
 
 	//Input settings only make sense if we have an attached scope

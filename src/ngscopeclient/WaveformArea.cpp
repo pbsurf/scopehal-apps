@@ -2065,7 +2065,7 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 	}
 
 	//Foreground color is used to determine background color and hovered/active colors
-	auto chancolor = ColorFromString(stream.m_channel->m_displaycolor);
+	auto chancolor = ColorFromString(stream.GetDisplayColor());
 	auto fcolor = ImGui::ColorConvertU32ToFloat4(chancolor);
 
 	auto& prefs = m_parent->GetSession().GetPreferences();
@@ -2200,7 +2200,7 @@ void WaveformArea::RenderOffscreenPeakMarkers(ImDrawList* list, shared_ptr<Displ
 	auto xunit = stream.GetXAxisUnits();
 	auto yunit = stream.GetYAxisUnits();
 
-	auto chancolor = ColorFromString(stream.m_channel->m_displaycolor);
+	auto chancolor = ColorFromString(stream.GetDisplayColor());
 	auto fcolor = ImGui::ColorConvertU32ToFloat4(chancolor);
 	auto& prefs = m_parent->GetSession().GetPreferences();
 	auto textColor = prefs.GetColor("Appearance.Peaks.peak_text_color");
@@ -2521,7 +2521,7 @@ void WaveformArea::RenderUniformDigitalBusWaveform(
 	float ytop = ybot - m_channelButtonHeight;
 	float ymid = ybot - m_channelButtonHeight/2;
 
-	auto color = ColorFromString(channel->GetStream().m_channel->m_displaycolor);
+	auto color = ColorFromString(channel->GetStream().GetDisplayColor());
 
 	//Figure out how wide to display it
 	uint32_t widthBits = channel->GetStream().GetDigitalWidth();
@@ -3155,7 +3155,7 @@ void WaveformArea::ToneMapAnalogOrDigitalWaveform(
 		**m_parent->GetTextureManager()->GetSampler(),
 		tex->GetView(),
 		vk::ImageLayout::eGeneral);
-	auto color = ImGui::ColorConvertU32ToFloat4(ColorFromString(channel->GetStream().m_channel->m_displaycolor));
+	auto color = ImGui::ColorConvertU32ToFloat4(ColorFromString(channel->GetStream().GetDisplayColor()));
 	WaveformToneMapArgs args(color, width, height);
 	pipe->Dispatch(cmdbuf, args, GetComputeBlockCount(width, 64), height);
 
@@ -3933,7 +3933,7 @@ void WaveformArea::RenderBERSamplingPoint(ImVec2 /*start*/, ImVec2 /*size*/)
 			ImVec2(x-delta, y)
 		};
 
-		draw_list->AddPolyline(points, 5,  ColorFromString(stream.m_channel->m_displaycolor), 0, weight);
+		draw_list->AddPolyline(points, 5,  ColorFromString(stream.GetDisplayColor()), 0, weight);
 
 		if(m_dragState != DRAG_STATE_BER_BOTH)
 		{
@@ -4165,7 +4165,7 @@ void WaveformArea::RenderTriggerLevelArrows(ImVec2 start, ImVec2 /*size*/)
 		if(channels.find(stream) == channels.end())
 			continue;
 
-		auto color = ColorFromString(stream.m_channel->m_displaycolor);
+		auto color = ColorFromString(stream.GetDisplayColor());
 
 		//Draw the arrow
 		//If currently dragging, show at mouse position rather than actual hardware trigger level
@@ -4979,7 +4979,7 @@ void WaveformArea::ChannelButton(shared_ptr<DisplayedChannel> chan, size_t index
 	float bgmul = 0.2;
 	float hmul = 0.4;
 	float amul = 0.6;
-	auto color = ColorFromString(rchan->m_displaycolor);
+	auto color = ColorFromString(stream.GetDisplayColor());
 	auto fcolor = ImGui::ColorConvertU32ToFloat4(color);
 	ImVec4 bgcolor(fcolor.x*bgmul, fcolor.y*bgmul, fcolor.z*bgmul, fcolor.w);
 	if(theme == THEME_LIGHT)
