@@ -1111,13 +1111,7 @@ void WaveformGroup::RenderTimeline(float width, float height)
 		}
 	}
 
-	if(ImGui::BeginPopupContextWindow())
-	{
-		if(ImGui::MenuItem("Autofit")){
-			AutofitHorizontal(width);
-		}
-		ImGui::EndPopup();
-	}
+	TimelineContextMenu(width);
 
 	//Handle dragging
 	//(Mouse is allowed to leave the window, as long as original click was within us)
@@ -1289,24 +1283,13 @@ void WaveformGroup::RenderTriggerPositionArrows(ImVec2 pos, float height)
 
 	//Make a list of all scope triggers
 	float ybot = pos.y + height;
-	auto scopes = m_parent->GetSession().GetScopes();
 	m_mouseOverTriggerArrow = false;
-	for(auto scope : scopes)
+	for(auto scope : GetTriggeredScopes())
 	{
-		auto trig = scope->GetTrigger();
-		if(!trig)
-			continue;
-		auto din = trig->GetInput(0);
-		if(!din)
-			continue;
+		auto din = scope->GetTrigger()->GetInput(0);
 
 		//Get the timestamp of the trigger
-		auto off = scope->GetTriggerOffset();
-
-		//If we have a skew calibration offset for this scope, display the virtual trigger there instead
-		int64_t skewCal = m_parent->GetSession().GetDeskew(scope);
-		if(skewCal != 0)
-			off = -skewCal;
+		auto off = GetTriggerPosition(scope);
 
 		auto xpos = XAxisUnitsToXPosition(off);
 
@@ -1397,6 +1380,91 @@ void WaveformGroup::RenderTriggerPositionArrows(ImVec2 pos, float height)
 			m_dragState = DRAG_STATE_NONE;
 		}
 	}
+}
+
+/**
+	@brief Runs the context menu of the timeline
+
+	@param width	Width of the plot, in pixels
+ */
+void WaveformGroup::TimelineContextMenu(float width)
+{
+	if(!ImGui::BeginPopupContextWindow())
+		return;
+
+	if(ImGui::MenuItem("Autofit"))
+		AutofitHorizontal(width);
+
+	//Fit the range between the cursors, with a little room either side so the cursors aren't on the edges of the plot
+	if( (m_xAxisCursorMode == X_CURSOR_DUAL) && !m_displayingEye)
+	{
+		int64_t start = min(m_xAxisCursorPositions[0], m_xAxisCursorPositions[1]);
+		int64_t end = max(m_xAxisCursorPositions[0], m_xAxisCursorPositions[1]);
+		if(ImGui::MenuItem("Zoom to Cursors", nullptr, false, end > start))
+		{
+			int64_t margin = (end - start) / 20;
+			ZoomToXRange(start - margin, end + margin, width);
+		}
+	}
+
+	//Moving to a time only makes sense in the time domain (and eye patterns can't be moved)
+	if( (m_xAxisUnit == Unit(Unit::UNIT_FS)) && !m_displayingEye)
+	{
+		ImGui::Separator();
+
+		if(ImGui::MenuItem("Go to t = 0"))
+			CenterOnXAxisValue(0);
+
+		//With several scopes, choose whose trigger
+		auto scopes = GetTriggeredScopes();
+		if(scopes.size() == 1)
+		{
+			if(ImGui::MenuItem("Go to trigger"))
+				CenterOnXAxisValue(GetTriggerPosition(scopes[0]));
+		}
+		else if(scopes.size() > 1)
+		{
+			if(ImGui::BeginMenu("Go to trigger"))
+			{
+				for(auto scope : scopes)
+				{
+					if(ImGui::MenuItem(scope->m_nickname.c_str()))
+						CenterOnXAxisValue(GetTriggerPosition(scope));
+				}
+				ImGui::EndMenu();
+			}
+		}
+	}
+
+	ImGui::EndPopup();
+}
+
+/**
+	@brief Gets the scopes which have a trigger set up (and so get a trigger arrow on the timeline)
+ */
+vector<shared_ptr<Oscilloscope>> WaveformGroup::GetTriggeredScopes()
+{
+	vector<shared_ptr<Oscilloscope>> ret;
+	for(auto scope : m_parent->GetSession().GetScopes())
+	{
+		auto trig = scope->GetTrigger();
+		if(trig && trig->GetInput(0))
+			ret.push_back(scope);
+	}
+	return ret;
+}
+
+/**
+	@brief Gets the X axis position of a scope's trigger, as shown by its arrow on the timeline
+ */
+int64_t WaveformGroup::GetTriggerPosition(shared_ptr<Oscilloscope> scope)
+{
+	//If we have a skew calibration offset for this scope, display the virtual trigger there instead
+	int64_t skewCal = m_parent->GetSession().GetDeskew(scope);
+	if(skewCal != 0)
+		return -skewCal;
+
+	return scope->GetTriggerOffset();
 }
 
 /**
@@ -1649,7 +1717,7 @@ void WaveformGroup::NavigateToTimestamp(int64_t timestamp, int64_t duration, Str
 	if(duration > 0)
 	{
 		//If the packet is too long to fit on screen at the current zoom, have it start 10% of the way across
-		int64_t viewWidth = PixelsToXAxisUnits(m_width);
+		int64_t viewWidth = PixelsToXAxisUnits(GetPlotWidth());
 		if(duration > viewWidth)
 			m_xAxisOffset = timestamp - viewWidth*0.1;
 
@@ -1660,7 +1728,7 @@ void WaveformGroup::NavigateToTimestamp(int64_t timestamp, int64_t duration, Str
 
 	//Just center the packet
 	else
-		m_xAxisOffset = timestamp - 0.5*(m_width / m_pixelsPerXUnit);
+		m_xAxisOffset = timestamp - PixelsToXAxisUnits(GetPlotWidth() / 2);
 
 	ClampXAxisOffset();
 
@@ -1798,6 +1866,16 @@ void WaveformGroup::ZoomHorizontalAround(int64_t target, float xpos, float pixel
 
 	m_pixelsPerXUnit = max(pixelsPerXUnit, GetMinPixelsPerXUnit());
 	m_xAxisOffset = target - PixelsToXAxisUnits(xpos - m_xpos);
+	ClampXAxisOffset();
+	ClearPersistence();
+}
+
+/**
+	@brief Scrolls the view so an X axis value is at the center of the plot, without changing the zoom
+ */
+void WaveformGroup::CenterOnXAxisValue(int64_t x)
+{
+	m_xAxisOffset = x - PixelsToXAxisUnits(GetPlotWidth() / 2);
 	ClampXAxisOffset();
 	ClearPersistence();
 }

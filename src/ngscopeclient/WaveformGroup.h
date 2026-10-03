@@ -202,11 +202,15 @@ public:
 	void AutofitHorizontal(float width);
 	void ZoomToXRange(int64_t start, int64_t end, float width);
 	void ZoomHorizontalAround(int64_t target, float xpos, float pixelsPerXUnit);
+	void CenterOnXAxisValue(int64_t x);
 
 protected:
 	void RenderTimeline(float width, float height);
 	float XAxisLabelTop(ImVec2 pos, ImVec2 tsize, float padding);
 	void RenderTriggerPositionArrows(ImVec2 pos, float height);
+	void TimelineContextMenu(float width);
+	int64_t GetTriggerPosition(std::shared_ptr<Oscilloscope> scope);
+	std::vector<std::shared_ptr<Oscilloscope>> GetTriggeredScopes();
 	void RenderXAxisCursors(ImVec2 pos, ImVec2 size);
 	void RenderMarkers(ImVec2 pos, ImVec2 size);
 	void DoCursorReadouts();
