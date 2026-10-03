@@ -248,6 +248,9 @@ bool WaveformGroup::Render()
 	ImVec2 clientArea = ImGui::GetContentRegionAvail();
 	m_width = clientArea.x;
 
+	//Don't show more than we can handle if the window got wider (or a saved session was zoomed out farther)
+	m_pixelsPerXUnit = max(m_pixelsPerXUnit, GetMinPixelsPerXUnit());
+
 	float yAxisWidthSpaced = GetYAxisWidth() + GetSpacing();
 	float plotWidth = clientArea.x - yAxisWidthSpaced;
 
@@ -1532,6 +1535,15 @@ void WaveformGroup::OnZoomOutHorizontal(int64_t target, float step)
 	//TODO: Clamp to bounds of all waveforms in the group
 	//(not width of single widest waveform, as they may have different offsets)
 
+	//Don't zoom out past the widest view we can handle
+	float minPixelsPerXUnit = GetMinPixelsPerXUnit();
+	if( (m_pixelsPerXUnit / step) < minPixelsPerXUnit)
+	{
+		step = m_pixelsPerXUnit / minPixelsPerXUnit;
+		if(step <= 1)
+			return;
+	}
+
 	//Calculate the *current* position of the target within the window
 	float delta = target - m_xAxisOffset;
 
@@ -1570,7 +1582,7 @@ void WaveformGroup::OnZoomHorizontalSnapped(float delta)
 	if(steps == 0)
 		return;
 
-	float plotWidth = m_width - GetYAxisWidth() - GetSpacing();
+	float plotWidth = GetPlotWidth();
 	if( (plotWidth <= 0) || (m_pixelsPerXUnit <= 0) )
 		return;
 
@@ -1766,7 +1778,7 @@ void WaveformGroup::ZoomToXRange(int64_t start, int64_t end, float width)
 	if(end <= start)
 		return;
 
-	m_pixelsPerXUnit = width / (end - start);
+	m_pixelsPerXUnit = max(width / (end - start), GetMinPixelsPerXUnit());
 	m_xAxisOffset = start;
 	ClampXAxisOffset();
 	ClearPersistence();
@@ -1784,23 +1796,42 @@ void WaveformGroup::ZoomHorizontalAround(int64_t target, float xpos, float pixel
 	if(pixelsPerXUnit <= 0)
 		return;
 
-	m_pixelsPerXUnit = pixelsPerXUnit;
+	m_pixelsPerXUnit = max(pixelsPerXUnit, GetMinPixelsPerXUnit());
 	m_xAxisOffset = target - PixelsToXAxisUnits(xpos - m_xpos);
 	ClampXAxisOffset();
 	ClearPersistence();
 }
 
 /**
-	@brief Keeps the view from scrolling past the start of the data, where that makes sense
+	@brief Gets the smallest horizontal scale we allow, at which the plot shows MAX_X_SPAN X axis units
 
-	Currently this only applies to frequency domain plots where every waveform starts at or above 0 Hz (e.g. the FFT of
-	a real valued signal): the left edge of the view is not allowed to go below 0 Hz, since there's never any data
-	there. Spectra that do have negative frequencies (e.g. the FFT of complex I/Q data) are not limited.
+	Returns 0 (no limit) before the first render, when the plot width isn't known yet.
+ */
+float WaveformGroup::GetMinPixelsPerXUnit()
+{
+	float plotWidth = GetPlotWidth();
+	if(plotWidth <= 0)
+		return 0;
+	return plotWidth / MAX_X_SPAN;
+}
+
+/**
+	@brief Keeps the view within the range of X axis values we can handle, and from scrolling past the start of the
+	data where that makes sense
+
+	The left edge is kept within +/- MAX_X_OFFSET, so that everything on screen fits in an int64_t.
+
+	Scrolling past the start of the data is only prevented for frequency domain plots where every waveform starts at
+	or above 0 Hz (e.g. the FFT of a real valued signal): the left edge of the view is not allowed to go below 0 Hz,
+	since there's never any data there. Spectra that do have negative frequencies (e.g. the FFT of complex I/Q data)
+	are not limited.
 
 	Density plots (e.g. waterfalls) in the group are ignored.
  */
 void WaveformGroup::ClampXAxisOffset()
 {
+	m_xAxisOffset = clamp(m_xAxisOffset, -MAX_X_OFFSET, MAX_X_OFFSET);
+
 	auto type = m_xAxisUnit.GetType();
 	if( (type != Unit::UNIT_HZ) && (type != Unit::UNIT_MICROHZ) )
 		return;
@@ -1885,8 +1916,9 @@ void WaveformGroup::AutofitHorizontal(float width)
 	//Don't divide by zero if no data!
 	if( dataFound && (sigwidth > 1) )
 	{
-		m_pixelsPerXUnit = width / sigwidth;
+		m_pixelsPerXUnit = max(width / sigwidth, GetMinPixelsPerXUnit());
 		m_xAxisOffset = start;
+		ClampXAxisOffset();
 		ClearPersistence();
 	}
 }

@@ -147,6 +147,10 @@ public:
 	float GetSpacing()
 	{ return ImGui::GetFrameHeightWithSpacing() - ImGui::GetFrameHeight(); }
 
+	///@brief Width of the plot area (excluding the Y axis), as of the last frame
+	float GetPlotWidth()
+	{ return m_width - GetYAxisWidth() - GetSpacing(); }
+
 	///@brief Gets an atomic snapshot of the waveform areas in this group
 	std::vector< std::shared_ptr<WaveformArea> > GetWaveformAreas()
 	{
@@ -228,6 +232,18 @@ protected:
 	int64_t GetRoundingDivisor(int64_t width_xunits);
 	void OnMouseWheel(float delta, float delta_h);
 	void ClampXAxisOffset();
+	float GetMinPixelsPerXUnit();
+
+	/**
+		@brief Widest view we allow, in X axis units
+
+		X axis values are int64_t (fs for time domain plots), which only reach about 9.2e18 (2.5 hours). This is
+		500 s/div over 10 divisions, leaving room for the view to be offset from zero.
+	 */
+	static constexpr double MAX_X_SPAN = 5e18;
+
+	///@brief Farthest the left edge of the view can be from zero, so the right edge fits in an int64_t
+	static constexpr int64_t MAX_X_OFFSET = 4e18;
 
 	///@brief Top level window we're attached to
 	MainWindow* m_parent;
