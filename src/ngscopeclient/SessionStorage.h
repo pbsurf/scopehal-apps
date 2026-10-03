@@ -37,6 +37,7 @@
 #include <memory>
 #include <mutex>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -150,6 +151,7 @@ protected:
 	The archive is written to a temporary file which replaces the target in Finish(), so a failed save doesn't destroy
 	an existing archive.
  */
+class ZipSessionReader;
 class ZipSessionWriter : public SessionWriter
 {
 public:
@@ -158,6 +160,8 @@ public:
 
 	bool IsOpen()
 	{ return m_zip != nullptr; }
+
+	bool KeepUnwrittenFiles();
 
 	virtual bool WriteFile(const std::string& relPath, const std::vector<Chunk>& chunks, bool compress) override;
 	virtual bool WriteSessionFile(const std::string& yaml) override;
@@ -170,8 +174,17 @@ protected:
 	std::string m_archivePath;
 	std::string m_tempPath;
 
-	///@brief Name of the session (archive file name without extension), used for the paths inside the archive
-	std::string m_baseName;
+	///@brief Name of the .scopesession entry
+	std::string m_sessionEntry;
+
+	///@brief Prefix of data directory entries (NAME_data/)
+	std::string m_dataPrefix;
+
+	///@brief Names of the entries written so far
+	std::set<std::string> m_writtenEntries;
+
+	///@brief The existing archive, if entries which weren't rewritten are copied from it
+	std::unique_ptr<ZipSessionReader> m_keepFrom;
 
 	///@brief The mz_zip_archive (opaque here so miniz.h stays out of this header)
 	void* m_zip;
@@ -255,6 +268,8 @@ public:
 	virtual std::string Describe(const std::string& relPath) override;
 
 protected:
+	friend class ZipSessionWriter;
+
 	std::unique_ptr<SessionFileData> ReadEntry(const std::string& name);
 
 	///@brief Location of an entry in the archive

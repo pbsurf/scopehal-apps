@@ -243,9 +243,12 @@ bool DirectorySessionWriter::Finish()
 ZipSessionWriter::ZipSessionWriter(const string& archivePath)
 	: m_archivePath(archivePath)
 	, m_tempPath(archivePath + ".tmp")
-	, m_baseName(filesystem::path(archivePath).stem().string())
 	, m_zip(nullptr)
 {
+	string baseName = filesystem::path(archivePath).stem().string();
+	m_sessionEntry = baseName + g_sessionExtension;
+	m_dataPrefix = baseName + "_data/";
+
 	auto zip = new mz_zip_archive;
 	mz_zip_zero_struct(zip);
 	if(!mz_zip_writer_init_file_v2(zip, m_tempPath.c_str(), 0, 0))
@@ -305,11 +308,34 @@ static size_t ReadChunks(void* opaque, mz_uint64 fileOffset, void* buf, size_t n
 	return copied;
 }
 
+/**
+	@brief Keeps the files of the existing archive which aren't written again, rather than discarding them
+
+	Used to save just the configuration of a session archive without touching its waveform data. The existing
+	session and data directory names inside the archive are kept, so the copied files stay where the session expects
+	them. Must be called before writing any files.
+ */
+bool ZipSessionWriter::KeepUnwrittenFiles()
+{
+	auto reader = make_unique<ZipSessionReader>(m_archivePath);
+	if(!reader->IsOpen())
+	{
+		m_error = reader->GetError();
+		return false;
+	}
+
+	m_sessionEntry = reader->m_sessionEntry;
+	m_dataPrefix = reader->m_dataPrefix;
+	m_keepFrom = std::move(reader);
+	return true;
+}
+
 bool ZipSessionWriter::AddEntry(const string& name, const vector<Chunk>& chunks, bool compress)
 {
 	auto zip = static_cast<mz_zip_archive*>(m_zip);
 	if(!zip)
 		return false;
+	m_writtenEntries.insert(name);
 
 	//Raw sample data barely compresses and is slow to deflate, and stored data can be read in place when loading
 	mz_uint level = compress ? MZ_DEFAULT_LEVEL : MZ_NO_COMPRESSION;
@@ -343,12 +369,12 @@ bool ZipSessionWriter::AddEntry(const string& name, const vector<Chunk>& chunks,
 
 bool ZipSessionWriter::WriteFile(const string& relPath, const vector<Chunk>& chunks, bool compress)
 {
-	return AddEntry(m_baseName + "_data/" + relPath, chunks, compress);
+	return AddEntry(m_dataPrefix + relPath, chunks, compress);
 }
 
 bool ZipSessionWriter::WriteSessionFile(const string& yaml)
 {
-	return AddEntry(m_baseName + g_sessionExtension, { Chunk{yaml.data(), yaml.size()} }, true);
+	return AddEntry(m_sessionEntry, { Chunk{yaml.data(), yaml.size()} }, true);
 }
 
 bool ZipSessionWriter::Finish()
@@ -356,6 +382,25 @@ bool ZipSessionWriter::Finish()
 	auto zip = static_cast<mz_zip_archive*>(m_zip);
 	if(!zip)
 		return false;
+
+	//Copy over the files of the existing archive which weren't written again (without recompressing them).
+	//Close it before replacing it, since Windows can't replace an open file
+	if(m_keepFrom && m_error.empty())
+	{
+		auto src = static_cast<mz_zip_archive*>(m_keepFrom->m_zip);
+		for(auto& it : m_keepFrom->m_entries)
+		{
+			if(m_writtenEntries.find(it.first) != m_writtenEntries.end())
+				continue;
+			if(!mz_zip_writer_add_from_zip_reader(zip, src, it.second.index))
+			{
+				m_error = string("Failed to copy \"") + it.first + "\" from \"" + m_archivePath + "\" to \"" +
+					m_tempPath + "\": " + mz_zip_get_error_string(mz_zip_get_last_error(zip));
+				break;
+			}
+		}
+	}
+	m_keepFrom = nullptr;
 
 	//Don't replace the target if any file failed to be added
 	if(!m_error.empty())

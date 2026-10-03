@@ -739,6 +739,15 @@ void PreferenceManager::InitializeDefaults()
 			.Label("Max recent files")
 			.Description("Maximum number of recent .scopesession file paths to save in history")
 			.Unit(Unit::UNIT_COUNTS));
+		files.AddPreference(
+			Preference::Bool("save_config_on_exit", false)
+			.Label("Save configuration on exit")
+			.Description(
+				"When ngscopeclient exits, save the current configuration (instruments, filters, windows, lab notes) "
+				"back to the file it was opened from or last saved to.\n\n"
+				"Waveform data already saved in a .scopesession or session archive is left as it is, and waveforms "
+				"captured since it was opened or saved are not added. Sessions which have never been saved are not "
+				"saved on exit."));
 
 	auto& help = this->m_treeRoot.AddCategory("Help");
 		auto& wizards = help.AddCategory("Wizards");

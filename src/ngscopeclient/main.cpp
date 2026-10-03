@@ -442,6 +442,9 @@ int main(int argc, char* argv[])
 		}
 		HTTPExportServer::Get().SetTriggerRequestCallback(nullptr);
 
+		//Save the session if the user asked for that
+		g_mainWindow->SaveSessionOnExit();
+
 		// Store window position and size for next startup
 		g_mainWindow->SaveWindowPositionAndSize();
 

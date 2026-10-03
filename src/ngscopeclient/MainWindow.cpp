@@ -3425,9 +3425,34 @@ bool MainWindow::LoadDialogs(const YAML::Node& node)
 }
 
 /**
-	@brief Actually save a file (may be triggered by file|save or file|save as)
+	@brief Saves the configuration back to the file it was opened from or last saved to, if enabled in preferences
+
+	Only the configuration is saved: any waveform data in the file is left as it is, since saving the waveforms can
+	be slow and would replace the captured data with the current history. Sessions which were never saved have no
+	file to go to, and are left alone.
+
+	Called once the main loop has exited, so there's no way to show an error popup; failures are only logged.
  */
-void MainWindow::DoSaveFile(string sessionPath)
+void MainWindow::SaveSessionOnExit()
+{
+	if(!m_session.GetPreferences().GetBool("Files.save_config_on_exit"))
+		return;
+	if(m_sessionFileName.empty())
+		return;
+
+	LogNotice("Saving configuration to \"%s\" on exit\n", m_sessionFileName.c_str());
+	if(!DoSaveFile(m_sessionFileName, true))
+		LogError("%s: %s\n", m_errorPopupTitle.c_str(), m_errorPopupMessage.c_str());
+}
+
+/**
+	@brief Actually save a file (may be triggered by file|save or file|save as)
+
+	@param sessionPath		Path to save to
+	@param keepWaveforms	Only save the configuration, leaving the waveform data already in the file as it is
+							(rather than replacing it with the current history)
+ */
+bool MainWindow::DoSaveFile(string sessionPath, bool keepWaveforms)
 {
 	//Stop the trigger so we don't have data races if a waveform comes in mid-save
 	m_session.StopTrigger();
@@ -3439,15 +3464,16 @@ void MainWindow::DoSaveFile(string sessionPath)
 	//A configuration is an archive without waveform data.
 	unique_ptr<SessionWriter> writer;
 	string datadir;
-	bool saveWaveforms = !IsSessionConfigPath(sessionPath);
-	if(IsSessionArchivePath(sessionPath) || !saveWaveforms)
+	bool isConfig = IsSessionConfigPath(sessionPath);
+	bool saveWaveforms = !isConfig && !keepWaveforms;
+	if(IsSessionArchivePath(sessionPath) || isConfig)
 	{
 		LogDebug("Saving session archive \"%s\"%s\n", sessionPath.c_str(), saveWaveforms ? "" : " (configuration only)");
 		auto zwriter = make_unique<ZipSessionWriter>(sessionPath);
-		if(!zwriter->IsOpen())
+		if(!zwriter->IsOpen() || (keepWaveforms && !isConfig && !zwriter->KeepUnwrittenFiles()))
 		{
 			ShowErrorPopup("Failed to save session", zwriter->GetError());
-			return;
+			return false;
 		}
 		writer = std::move(zwriter);
 	}
@@ -3460,10 +3486,12 @@ void MainWindow::DoSaveFile(string sessionPath)
 		//Get the data directory for the session
 		string base = sessionPath.substr(0, sessionPath.length() - strlen(".scopesession"));
 		datadir = base + "_data";
-		LogDebug("Saving session file \"%s\" (data directory %s)\n", sessionPath.c_str(), datadir.c_str());
+		LogDebug("Saving session file \"%s\" (data directory %s)%s\n",
+			sessionPath.c_str(), datadir.c_str(), saveWaveforms ? "" : " (configuration only)");
 
-		if(!SetupDataDirectory(datadir))
-			return;
+		//Files are written in place, so leave the existing waveform data alone if we're keeping it
+		if(saveWaveforms && !SetupDataDirectory(datadir))
+			return false;
 		writer = make_unique<DirectorySessionWriter>(sessionPath, datadir);
 	}
 
@@ -3472,7 +3500,7 @@ void MainWindow::DoSaveFile(string sessionPath)
 	if(!SaveSessionToYaml(node, *writer, saveWaveforms) || !SaveLabNotes(*writer))
 	{
 		ShowErrorPopup("Failed to save session", writer->GetError());
-		return;
+		return false;
 	}
 
 	//Write the generated YAML, and finish writing the archive
@@ -3481,7 +3509,7 @@ void MainWindow::DoSaveFile(string sessionPath)
 	if(!writer->WriteSessionFile(out.c_str()) || !writer->Finish())
 	{
 		ShowErrorPopup("Failed to save session", writer->GetError());
-		return;
+		return false;
 	}
 
 	//Add to recent files list
@@ -3489,6 +3517,7 @@ void MainWindow::DoSaveFile(string sessionPath)
 	m_sessionDataDir = datadir;
 	m_recentFiles[sessionPath] = time(nullptr);
 	SaveRecentFileList();
+	return true;
 }
 
 /**

@@ -543,9 +543,11 @@ public:
 	const std::string& GetGraphEditorConfigBlob()
 	{ return m_graphEditorConfigBlob; }
 
+	void SaveSessionOnExit();
+
 protected:
 	void OnSaveAs();
-	void DoSaveFile(std::string sessionPath);
+	bool DoSaveFile(std::string sessionPath, bool keepWaveforms = false);
 	bool SaveSessionToYaml(YAML::Node& node, SessionWriter& writer, bool saveWaveforms);
 	bool SaveLabNotes(SessionWriter& writer);
 	void LoadLabNotes(SessionReader& reader);

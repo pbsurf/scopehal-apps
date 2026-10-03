@@ -487,14 +487,15 @@ bool Session::LoadWaveformData(int version, SessionReader& reader)
 		auto scope = it.first;
 		int id = m_idtable[(Instrument*)scope.get()];
 
-		//No metadata file (e.g. session file copied without its data directory)? No waveforms at all, skip loading.
+		//No metadata file (e.g. session file copied without its data directory, or the scope was added after the
+		//waveforms were last saved)? No waveforms for this scope, but other scopes may still have some
 		if(!reader.ReadTextFile(string("scope_") + to_string(id) + "_metadata.yml", text))
-			return true;
+			continue;
 		auto docs = YAML::LoadAll(text);
 
-		//Nothing there? No waveforms at all, skip loading
+		//Nothing there? No waveforms for this scope
 		if(docs.empty())
-			return true;
+			continue;
 
 		if(!LoadWaveformDataForScope(version, docs[0], scope, reader))
 		{
