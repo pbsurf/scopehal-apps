@@ -383,6 +383,7 @@ WaveformArea::WaveformArea(StreamDescriptor stream, shared_ptr<WaveformGroup> gr
 	, m_bertChannelDuringDrag(nullptr)
 	, m_lastRightClickOffset(0)
 	, m_channelButtonHeight(0)
+	, m_channelButtonsBottom(0)
 	, m_dragPeakLabelId(0)
 	, m_mouseOverButton(false)
 	, m_mouseOverPeakMarker(false)
@@ -939,6 +940,7 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 				ChannelButton(GetDisplayedChannel(i), i);
 
 		ImGui::EndGroup();
+		m_channelButtonsBottom = m_inputs.empty() ? 0 : ImGui::GetItemRectMax().y;
 
 		//Draw the vertical scale on the right side of the plot
 		ImGui::SetCursorScreenPos(ImVec2(startCursor.x + csize.x, startCursor.y));
@@ -1611,7 +1613,8 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 	auto& peaks = pf->GetPeaks();
 	auto& labels = channel->m_peakLabels;
 
-	//The peak list may hold more peaks than we display, for downstream filters
+	//The peak list holds more peaks than we display: candidates for the label hysteresis below,
+	//and maybe more for downstream filters
 	size_t npeaks = pf->GetDisplayedPeakCount();
 
 	//TODO: add a preference for peak circle color and size?
@@ -1619,31 +1622,30 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 	ImU32 lineColor = ColorFromString("#00ff00ff");
 	float radius = ImGui::GetFontSize() * 0.5;
 
-	//Motion and fading are per second, not per frame, so they don't depend on the frame rate.
+	//Motion is per second, not per frame, so it doesn't depend on the frame rate.
 	//Clamp the time step so a stall doesn't make labels jump
 	float dt = min(ImGui::GetIO().DeltaTime, 0.1f);
 	float step = 180 * dt;					//pixels
-	float alphaStep = 240 * dt;
 
-	//Distance within which two peaks are considered to be the same
+	//Distance within which a peak is considered to be the same one as last time
 	float neighborThresholdPixels = 3 * ImGui::GetFontSize();
 	int64_t neighborThresholdXUnits = m_group->PixelsToXAxisUnits(neighborThresholdPixels);
+
+	//A label keeps its peak for at least the dwell time (in seconds). After that, a peak without a label only takes
+	//a label from a labeled peak if it's taller by the margin, or has been taller for the dwell time.
+	//Otherwise, on a noisy spectrum where all the peaks are about the same height, the labels would go to different
+	//peaks with every waveform
+	const float dwellTime = 1;
+	auto yunit = stream.GetYAxisUnits();
+	float margin = yunit.IsLogarithmic() ? 3 : (0.05 * stream.GetVoltageRange());
 
 	//Clip to the plot, so peaks and labels don't draw over the Y axis
 	ImVec2 wmin = m_plotPos;
 	ImVec2 wmax(m_plotPos.x + m_plotSize.x, m_plotPos.y + m_plotSize.y);
 	list->PushClipRect(wmin, wmax, true);
 
-	//Go through the list of peaks and decay all of the alpha values
-	for(size_t i=0; i<labels.size(); )
+	auto removeLabel = [&](size_t i)
 	{
-		labels[i].m_peakAlpha -= alphaStep;
-		if(labels[i].m_peakAlpha >= -255)
-		{
-			i++;
-			continue;
-		}
-
 		//Stop dragging if we're deleting it
 		if(IsDraggingPeakLabel(labels[i]))
 		{
@@ -1652,47 +1654,166 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 			m_dragPeakLabelId = 0;
 		}
 		labels.erase(labels.begin() + i);
+	};
+
+	//If there are more labels than peaks to show (fewer peaks were found, or Number of Peaks went down),
+	//remove the ones on the shortest peaks. The one being dragged goes last
+	while(labels.size() > npeaks)
+	{
+		size_t worst = 0;
+		for(size_t i=1; i<labels.size(); i++)
+		{
+			bool draggingI = IsDraggingPeakLabel(labels[i]);
+			bool draggingWorst = IsDraggingPeakLabel(labels[worst]);
+			if( (draggingWorst && !draggingI) ||
+				( (draggingI == draggingWorst) && (labels[i].m_peakYpos < labels[worst].m_peakYpos) ) )
+			{
+				worst = i;
+			}
+		}
+		removeLabel(worst);
 	}
 
-	//Initial peak processing
-	//Peaks are sorted tallest first, so taller peaks get first pick of the existing labels
-	vector<bool> claimed(labels.size(), false);
-	for(size_t ipeak=0; ipeak<npeaks; ipeak++)
+	//Labels sorted by peak height, tallest first
+	vector<size_t> byHeight;
+	for(size_t i=0; i<labels.size(); i++)
+		byHeight.push_back(i);
+	sort(byHeight.begin(), byHeight.end(),
+		[&](size_t a, size_t b) { return labels[a].m_peakYpos > labels[b].m_peakYpos; });
+
+	//Follow each label's peak: the nearest peak within the threshold is the same one.
+	//Taller labels get first pick. If the peak isn't found, the label keeps the last values for now
+	vector<bool> used(peaks.size(), false);
+	vector<bool> present(labels.size(), false);
+	for(auto i : byHeight)
 	{
-		auto p = peaks[ipeak];
+		auto& label = labels[i];
+		label.m_age += dt;
 
-		//Draw the circle for the peak
-		list->AddCircle(
-			ImVec2(m_group->XAxisUnitsToXPosition(p.m_x), YAxisUnitsToYPosition(p.m_y)),
-			radius,
-			circleColor,
-			0,
-			1);
-
-		//Find the closest unclaimed label within the threshold, and call it the same peak
 		ssize_t nearest = -1;
 		int64_t nearestDist = neighborThresholdXUnits;
-		for(size_t i=0; i<labels.size(); i++)
+		for(size_t j=0; j<peaks.size(); j++)
 		{
-			int64_t dist = llabs(labels[i].m_peakXpos - p.m_x);
-			if(!claimed[i] && (dist < nearestDist))
+			int64_t dist = llabs(peaks[j].m_x - label.m_peakXpos);
+			if(!used[j] && (dist < nearestDist))
 			{
-				nearest = i;
+				nearest = j;
 				nearestDist = dist;
 			}
 		}
-		if(nearest >= 0)
+		if(nearest < 0)
+			continue;
+
+		auto& p = peaks[nearest];
+		used[nearest] = true;
+		present[i] = true;
+		label.m_peakXpos = p.m_x;
+		label.m_peakYpos = p.m_y;
+		label.m_fwhm = p.m_fwhm;
+	}
+
+	//Free up labels that have had their peak for the dwell time and either lost it, or are beaten by a peak without
+	//a label. The shortest labeled peaks are compared to the tallest unlabeled ones (peaks are sorted tallest first).
+	//A label being dragged keeps its peak
+	vector<bool> isFree(labels.size(), false);
+	size_t ipeak = 0;
+	for(auto it = byHeight.rbegin(); it != byHeight.rend(); it++)
+	{
+		auto i = *it;
+		auto& label = labels[i];
+		bool canFree = (label.m_age >= dwellTime) && !IsDraggingPeakLabel(label);
+		if(!present[i])
 		{
-			auto& label = labels[nearest];
-			claimed[nearest] = true;
-			label.m_peakXpos = p.m_x;
-			label.m_peakYpos = p.m_y;
-			label.m_peakAlpha = 255;
-			label.m_fwhm = p.m_fwhm;
+			label.m_beatenTime = 0;
+			isFree[i] = canFree;
 			continue;
 		}
 
-		//Not found, create a new peak
+		while( (ipeak < peaks.size()) && used[ipeak])
+			ipeak++;
+		if( (ipeak >= peaks.size()) || (peaks[ipeak].m_y <= label.m_peakYpos) )
+		{
+			label.m_beatenTime = 0;
+			continue;
+		}
+
+		label.m_beatenTime += dt;
+		if(canFree && ( (peaks[ipeak].m_y > label.m_peakYpos + margin) || (label.m_beatenTime >= dwellTime) ) )
+			isFree[i] = true;
+		ipeak++;
+	}
+
+	//The tallest peaks without a label get one, until there are npeaks labels
+	size_t nkept = 0;
+	for(size_t i=0; i<labels.size(); i++)
+	{
+		if(!isFree[i])
+			nkept++;
+	}
+	vector<size_t> targets;
+	for(size_t j=0; (j < peaks.size()) && (nkept + targets.size() < npeaks); j++)
+	{
+		if(!used[j])
+			targets.push_back(j);
+	}
+
+	//Give them the free labels first, closest pairs first, however far apart they are.
+	//The label slides over to its new peak (see the spring below)
+	struct LabelMove
+	{
+		int64_t dist;
+		size_t label;
+		size_t target;
+	};
+	vector<LabelMove> moves;
+	for(size_t i=0; i<labels.size(); i++)
+	{
+		if(!isFree[i])
+			continue;
+		for(size_t t=0; t<targets.size(); t++)
+			moves.push_back({llabs(labels[i].m_labelXpos - peaks[targets[t]].m_x), i, t});
+	}
+	sort(moves.begin(), moves.end(), [](const LabelMove& a, const LabelMove& b) { return a.dist < b.dist; });
+	vector<bool> targetDone(targets.size(), false);
+	for(auto& m : moves)
+	{
+		if(!isFree[m.label] || targetDone[m.target])
+			continue;
+
+		auto& label = labels[m.label];
+		auto& p = peaks[targets[m.target]];
+		isFree[m.label] = false;
+		targetDone[m.target] = true;
+		label.m_peakXpos = p.m_x;
+		label.m_peakYpos = p.m_y;
+		label.m_fwhm = p.m_fwhm;
+		label.m_age = 0;
+		label.m_beatenTime = 0;
+	}
+
+	//Default label position (in pixels) for a peak (also in pixels): just left of the peak,
+	//and above the peak if it's in the bottom half of the plot, otherwise below
+	auto defaultLabelPos = [&](ImVec2 peak)
+	{
+		float fontSize = ImGui::GetFontSize();
+		bool bottomHalf = peak.y > (wmin.y + wmax.y)/2;
+		return ImVec2(peak.x - 5*fontSize, peak.y + (bottomHalf ? -3*fontSize : 3*fontSize));
+	};
+
+	//Remove free labels that didn't get a peak
+	for(ssize_t i=labels.size()-1; i>=0; i--)
+	{
+		if(isFree[i])
+			removeLabel(i);
+	}
+
+	//And create new labels for the peaks still without one
+	for(size_t t=0; t<targets.size(); t++)
+	{
+		if(targetDone[t])
+			continue;
+		auto& p = peaks[targets[t]];
+
 		//IDs are unique across all areas, since a channel (and its labels) can move between areas
 		static uint64_t nextPeakLabelId = 1;
 
@@ -1702,32 +1823,30 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 		npeak.m_peakYpos = p.m_y;
 		npeak.m_fwhm = p.m_fwhm;
 
-		//Initial position is just left of the peak, and above the peak if in the bottom half, otherwise below
-		npeak.m_labelOffset.x = -5 * ImGui::GetFontSize();
-		if(p.m_y > stream.GetOffset())
-			npeak.m_labelOffset.y = -3 * ImGui::GetFontSize();
-		else
-			npeak.m_labelOffset.y = 3 * ImGui::GetFontSize();
+		auto lpos = defaultLabelPos(ImVec2(m_group->XAxisUnitsToXPosition(p.m_x), YAxisUnitsToYPosition(p.m_y)));
+		npeak.m_labelXpos = m_group->XPositionToXAxisUnits(lpos.x);
+		npeak.m_labelYpos = YPositionToYAxisUnits(lpos.y);
 
 		//Size is set when we measure the text
 		npeak.m_labelSize = ImVec2(0, 0);
 		npeak.m_shrinkTime = 0;
 		npeak.m_shrinkWidth = 0;
 
-		//Default to 100% alpha
-		npeak.m_peakAlpha = 255;
+		npeak.m_age = 0;
+		npeak.m_beatenTime = 0;
 
 		labels.push_back(npeak);
-		claimed.push_back(true);
 	}
 
-	//Hide labels for peaks no longer in the list right away, so we never show more labels than peaks.
-	//Keep them (hidden) until alpha decays to -255, so a peak that comes back gets its old label position.
-	//A label being dragged stays visible and fades as before, so it doesn't vanish from under the mouse.
-	for(size_t i=0; i<labels.size(); i++)
+	//Draw the circles for the labeled peaks
+	for(auto& label : labels)
 	{
-		if(!claimed[i] && !IsDraggingPeakLabel(labels[i]))
-			labels[i].m_peakAlpha = min(labels[i].m_peakAlpha, -1.0f);
+		list->AddCircle(
+			ImVec2(m_group->XAxisUnitsToXPosition(label.m_peakXpos), YAxisUnitsToYPosition(label.m_peakYpos)),
+			radius,
+			circleColor,
+			0,
+			1);
 	}
 
 	auto font = m_parent->GetFontPref("Appearance.Peaks.label_font");
@@ -1737,16 +1856,13 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 	auto uwfm = dynamic_cast<UniformWaveformBase*>(stream.GetData());
 	int64_t binsize = uwfm ? uwfm->m_timescale : 0;
 	auto xunit = stream.GetXAxisUnits();
-	auto yunit = stream.GetYAxisUnits();
 
-	//Format the text of each visible label and measure it
+	//Format the text of each label and measure it
 	float padding = 2;
 	vector<string> text(labels.size());
 	for(size_t i=0; i<labels.size(); i++)
 	{
 		auto& label = labels[i];
-		if(label.m_peakAlpha < 0)
-			continue;
 
 		//Widths are measured to the first bin at or below half maximum on each side, so are an upper bound,
 		//and the narrowest peak measures as two bins
@@ -1797,81 +1913,116 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 		}
 	}
 
-	//Physics. Hidden labels don't take part, and dragged labels don't move.
+	//Physics, on the label positions in pixels. Dragged labels don't move.
 	//No step moves a label further than needed, so labels settle instead of oscillating
+	vector<ImVec2> pos(labels.size());
+	for(size_t i=0; i<labels.size(); i++)
+	{
+		pos[i] = ImVec2(
+			m_group->XAxisUnitsToXPosition(labels[i].m_labelXpos),
+			YAxisUnitsToYPosition(labels[i].m_labelYpos));
+	}
+	auto oldPos = pos;
+
 	float springMaxLength = 15 * ImGui::GetFontSize();
 	for(size_t i=0; i<labels.size(); i++)
 	{
 		auto& label = labels[i];
-		if( (label.m_peakAlpha < 0) || IsDraggingPeakLabel(label) )
+		if(IsDraggingPeakLabel(label))
 			continue;
 
 		ImVec2 peak(m_group->XAxisUnitsToXPosition(label.m_peakXpos), YAxisUnitsToYPosition(label.m_peakYpos));
-		auto& off = label.m_labelOffset;
+		auto& p = pos[i];
+		bool peakIsOnScreen = (peak.x >= wmin.x) && (peak.x <= wmax.x) && (peak.y >= wmin.y) && (peak.y <= wmax.y);
 
-		//Physics 1: Spring to pull labels closer to peaks if they're too far away
-		float mag = sqrtf(off.x*off.x + off.y*off.y);
-		if(mag > springMaxLength)
+		//If the peak is on screen but the label is entirely off screen (after changing to a distant peak, or panning
+		//or zooming), jump the label to its default position next to the peak, rather than sliding it in from afar
+		if(peakIsOnScreen &&
+			( (p.x + label.m_labelSize.x/2 < wmin.x) || (p.x - label.m_labelSize.x/2 > wmax.x) ||
+			  (p.y + label.m_labelSize.y/2 < wmin.y) || (p.y - label.m_labelSize.y/2 > wmax.y) ) )
 		{
-			float scale = (mag - min(step, mag - springMaxLength)) / mag;
-			off.x *= scale;
-			off.y *= scale;
+			p = defaultLabelPos(peak);
 		}
 
-		//Physics 2: If peak is on screen but label is not, push the label back on screen.
+		//Physics 1: Spring to pull labels closer to peaks if they're too far away.
+		//Within that distance the label doesn't move, so it stays put while its peak moves around a little.
+		//The spring is faster the further out the label is, so it catches up quickly after changing peaks or zooming
+		float dx = p.x - peak.x;
+		float dy = p.y - peak.y;
+		float mag = sqrtf(dx*dx + dy*dy);
+		if(mag > springMaxLength)
+		{
+			float excess = mag - springMaxLength;
+			float move = min(excess, max(step, excess * 5 * dt));
+			p.x -= dx * move / mag;
+			p.y -= dy * move / mag;
+		}
+
+		//Physics 2: If the label covers its peak marker (as it can right after changing peaks, since the label doesn't
+		//move while the new peak is close enough), move it up or down until the marker is clear.
+		//Stay on the side the label is on, unless there's no room for it in the plot on that side.
+		//Move quickly, so the marker isn't hidden for long
+		float clearance = radius + 2;
+		float halfWidth = label.m_labelSize.x/2 + clearance;
+		float halfHeight = label.m_labelSize.y/2 + clearance;
+		if( (fabs(p.x - peak.x) < halfWidth) && (fabs(p.y - peak.y) < halfHeight) )
+		{
+			bool roomAbove = (peak.y - 2*halfHeight) >= wmin.y;
+			bool roomBelow = (peak.y + 2*halfHeight) <= wmax.y;
+			bool up = (p.y <= peak.y);
+			if(up && !roomAbove && roomBelow)
+				up = false;
+			else if(!up && !roomBelow && roomAbove)
+				up = true;
+
+			float target = up ? (peak.y - halfHeight) : (peak.y + halfHeight);
+			float overlap = fabs(target - p.y);
+			float move = min(overlap, max(step, overlap * 10 * dt));
+			p.y += up ? -move : move;
+		}
+
+		//Physics 3: If peak is on screen but label is not, push the label back on screen.
 		//On screen means inside the plot, so labels don't sit under the Y axis.
 		//Don't move along an axis where the label doesn't fit.
 		//TODO: omit if label is manually positioned?
-		bool peakIsOnScreen = (peak.x >= wmin.x) && (peak.x <= wmax.x) && (peak.y >= wmin.y) && (peak.y <= wmax.y);
 		if(peakIsOnScreen)
 		{
-			float labelLeft = peak.x + off.x - label.m_labelSize.x/2;
-			float labelRight = peak.x + off.x + label.m_labelSize.x/2;
-			float labelTop = peak.y + off.y - label.m_labelSize.y/2;
-			float labelBottom = peak.y + off.y + label.m_labelSize.y/2;
+			float labelLeft = p.x - label.m_labelSize.x/2;
+			float labelRight = p.x + label.m_labelSize.x/2;
+			float labelTop = p.y - label.m_labelSize.y/2;
+			float labelBottom = p.y + label.m_labelSize.y/2;
 
 			if( (labelLeft < wmin.x) && (labelRight <= wmax.x) )
-				off.x += min(step, wmin.x - labelLeft);
+				p.x += min(step, wmin.x - labelLeft);
 			else if( (labelRight > wmax.x) && (labelLeft >= wmin.x) )
-				off.x -= min(step, labelRight - wmax.x);
+				p.x -= min(step, labelRight - wmax.x);
 
 			if( (labelTop < wmin.y) && (labelBottom <= wmax.y) )
-				off.y += min(step, wmin.y - labelTop);
+				p.y += min(step, wmin.y - labelTop);
 			else if( (labelBottom > wmax.y) && (labelTop >= wmin.y) )
-				off.y -= min(step, labelBottom - wmax.y);
+				p.y -= min(step, labelBottom - wmax.y);
 		}
 	}
 
-	//Physics 3: If labels collide, move them apart along the axis with the least overlap.
+	//Physics 4: If labels collide, move them apart along the axis with the least overlap.
 	//Each label moves by at most half the overlap (or all of it if the other one is being dragged)
-	float margin = 5;
+	float collisionMargin = 5;
 	for(size_t i=0; i<labels.size(); i++)
 	{
 		auto& ilabel = labels[i];
-		if(ilabel.m_peakAlpha < 0)
-			continue;
 		bool draggingI = IsDraggingPeakLabel(ilabel);
 
 		for(size_t j=i+1; j<labels.size(); j++)
 		{
 			auto& jlabel = labels[j];
-			if(jlabel.m_peakAlpha < 0)
-				continue;
 			bool draggingJ = IsDraggingPeakLabel(jlabel);
 			if(draggingI && draggingJ)
 				continue;
 
-			ImVec2 ipos(
-				m_group->XAxisUnitsToXPosition(ilabel.m_peakXpos) + ilabel.m_labelOffset.x,
-				YAxisUnitsToYPosition(ilabel.m_peakYpos) + ilabel.m_labelOffset.y);
-			ImVec2 jpos(
-				m_group->XAxisUnitsToXPosition(jlabel.m_peakXpos) + jlabel.m_labelOffset.x,
-				YAxisUnitsToYPosition(jlabel.m_peakYpos) + jlabel.m_labelOffset.y);
-
-			float dx = jpos.x - ipos.x;
-			float dy = jpos.y - ipos.y;
-			float overlapX = (ilabel.m_labelSize.x + jlabel.m_labelSize.x)/2 + margin - fabs(dx);
-			float overlapY = (ilabel.m_labelSize.y + jlabel.m_labelSize.y)/2 + margin - fabs(dy);
+			float dx = pos[j].x - pos[i].x;
+			float dy = pos[j].y - pos[i].y;
+			float overlapX = (ilabel.m_labelSize.x + jlabel.m_labelSize.x)/2 + collisionMargin - fabs(dx);
+			float overlapY = (ilabel.m_labelSize.y + jlabel.m_labelSize.y)/2 + collisionMargin - fabs(dy);
 			if( (overlapX <= 0) || (overlapY <= 0) )
 				continue;
 
@@ -1893,15 +2044,24 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 			float move = min(step, share);
 			if(!draggingI)
 			{
-				ilabel.m_labelOffset.x -= dir.x * move;
-				ilabel.m_labelOffset.y -= dir.y * move;
+				pos[i].x -= dir.x * move;
+				pos[i].y -= dir.y * move;
 			}
 			if(!draggingJ)
 			{
-				jlabel.m_labelOffset.x += dir.x * move;
-				jlabel.m_labelOffset.y += dir.y * move;
+				pos[j].x += dir.x * move;
+				pos[j].y += dir.y * move;
 			}
 		}
+	}
+
+	//Save the positions of labels that moved (only those, so rounding doesn't make the others creep)
+	for(size_t i=0; i<labels.size(); i++)
+	{
+		if(pos[i].x != oldPos[i].x)
+			labels[i].m_labelXpos = m_group->XPositionToXAxisUnits(pos[i].x);
+		if(pos[i].y != oldPos[i].y)
+			labels[i].m_labelYpos = YPositionToYAxisUnits(pos[i].y);
 	}
 
 	//Foreground color is used to determine background color and hovered/active colors
@@ -1916,21 +2076,14 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 	for(size_t i=0; i<labels.size(); i++)
 	{
 		auto& label = labels[i];
-		if(label.m_peakAlpha < 0)
-			continue;
 
 		ImVec2 peak(m_group->XAxisUnitsToXPosition(label.m_peakXpos), YAxisUnitsToYPosition(label.m_peakYpos));
-		float labelXpos = peak.x + label.m_labelOffset.x;
-		float labelYpos = peak.y + label.m_labelOffset.y;
+		float labelXpos = pos[i].x;
+		float labelYpos = pos[i].y;
 		float labelLeft = labelXpos - label.m_labelSize.x/2;
 		float labelRight = labelXpos + label.m_labelSize.x/2;
 		float labelTop = labelYpos - label.m_labelSize.y/2;
 		float labelBottom = labelYpos + label.m_labelSize.y/2;
-
-		//Update alpha
-		int alpha = static_cast<int>(label.m_peakAlpha);
-		lineColor &= ~(0xff << IM_COL32_A_SHIFT);
-		lineColor |= (alpha << IM_COL32_A_SHIFT);
 
 		//Line from peak to closest point on label perimeter
 		//TODO: this doesn't account for rounding of rectangle corners
@@ -1985,7 +2138,7 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 		//Draw rectangle filling
 		float rounding = 3;
 		auto fillColor = ImGui::ColorConvertFloat4ToU32(
-			ImVec4(fcolor.x*fmul, fcolor.y*fmul, fcolor.z*fmul, alpha/255.0f) );
+			ImVec4(fcolor.x*fmul, fcolor.y*fmul, fcolor.z*fmul, 1) );
 		list->AddRectFilled(tl, br, fillColor, rounding);
 
 		//Draw rectangle outline
@@ -1999,7 +2152,7 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 	}
 	ImGui::PopFont();
 
-	RenderOffscreenPeakMarkers(list, channel, npeaks);
+	RenderOffscreenPeakMarkers(list, channel);
 
 	list->PopClipRect();
 }
@@ -2012,14 +2165,17 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 
 	@param list		Draw list to render to
 	@param channel	Channel whose peaks are being drawn
-	@param npeaks	Number of peaks (from the tallest) that are labeled
  */
-void WaveformArea::RenderOffscreenPeakMarkers(ImDrawList* list, shared_ptr<DisplayedChannel> channel, size_t npeaks)
+void WaveformArea::RenderOffscreenPeakMarkers(ImDrawList* list, shared_ptr<DisplayedChannel> channel)
 {
 	auto stream = channel->GetStream();
-	auto pf = dynamic_cast<PeakDetectionFilter*>(stream.m_channel);
-	auto& peaks = pf->GetPeaks();
-	npeaks = min(npeaks, peaks.size());
+
+	//The labeled peaks, tallest first
+	vector<Peak> peaks;
+	for(auto& label : channel->m_peakLabels)
+		peaks.push_back(Peak(label.m_peakXpos, label.m_peakYpos, label.m_fwhm));
+	sort(peaks.begin(), peaks.end(), [](const Peak& a, const Peak& b) { return a.m_y > b.m_y; });
+	size_t npeaks = peaks.size();
 
 	float plotLeft = m_plotPos.x;
 	float plotRight = m_plotPos.x + m_plotSize.x;
@@ -2077,9 +2233,13 @@ void WaveformArea::RenderOffscreenPeakMarkers(ImDrawList* list, shared_ptr<Displ
 		float width = 3*padding + arrowSize + textSize.x;
 		float height = 2*padding + max(textSize.y, 2*arrowSize);
 
-		//At the height of the tallest peak on that side, but kept inside the plot
+		//At the height of the tallest peak on that side, but kept inside the plot.
+		//On the left, keep below the channel buttons in the corner too, if there's room
+		float top = plotTop;
+		if(left && (m_channelButtonsBottom + padding + height <= plotBottom))
+			top = max(top, m_channelButtonsBottom + padding);
 		float ymid = YAxisUnitsToYPosition(tallest.m_y);
-		ymid = max(ymid, plotTop + height/2);
+		ymid = max(ymid, top + height/2);
 		ymid = min(ymid, plotBottom - height/2);
 
 		float boxLeft = left ? plotLeft : (plotRight - width);
@@ -5463,9 +5623,8 @@ void WaveformArea::OnDragUpdate()
 				float anchorX = mouse.x + m_dragPeakAnchorOffset.x;
 				float anchorY = mouse.y + m_dragPeakAnchorOffset.y;
 
-				label->m_labelOffset = ImVec2(
-					anchorX - m_group->XAxisUnitsToXPosition(label->m_peakXpos),
-					anchorY - YAxisUnitsToYPosition(label->m_peakYpos));
+				label->m_labelXpos = m_group->XPositionToXAxisUnits(anchorX);
+				label->m_labelYpos = YPositionToYAxisUnits(anchorY);
 			}
 			break;
 

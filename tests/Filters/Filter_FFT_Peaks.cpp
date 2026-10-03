@@ -83,8 +83,10 @@ TEST_CASE("Filter_FFT_Peaks")
 	REQUIRE(out != nullptr);
 	int64_t bin = out->m_timescale;
 
+	//The peak list also holds extra candidates for the labels
 	auto& peaks = filter->GetPeaks();
-	REQUIRE(peaks.size() == 10);
+	REQUIRE(filter->GetDisplayedPeakCount() == 10);
+	REQUIRE(peaks.size() >= 10);
 	LogVerbose("FFT peaks (bin = %s):\n", Unit(Unit::UNIT_MICROHZ).PrettyPrint(bin).c_str());
 	for(auto& p : peaks)
 		LogVerbose("    %s: %.2f dBm\n", Unit(Unit::UNIT_MICROHZ).PrettyPrint(p.m_x).c_str(), p.m_y);

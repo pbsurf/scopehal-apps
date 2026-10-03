@@ -164,8 +164,8 @@ public:
 /**
 	@brief State for a single peak label
 
-	The peak position is in waveform units. The label position is a pixel offset from the peak, so the label moves
-	with the peak and keeps its distance on screen when zooming
+	The peak position is in waveform units. The label position is in waveform units too, so the label stays put while
+	its peak moves around a little (as it does on a noisy spectrum), and is only pulled in once it gets too far away
 
 	X axis positions are in base units, not scaled by timebase
  */
@@ -174,8 +174,11 @@ struct PeakLabel
 	///@brief Unique ID, so a label can be tracked while the vector holding it changes
 	uint64_t m_id;
 
-	///@brief Offset from the peak to the label's centroid, in pixels
-	ImVec2 m_labelOffset;
+	///@brief X axis position of the label's centroid
+	int64_t m_labelXpos;
+
+	///@brief Y axis position of the label's centroid
+	float m_labelYpos;
 
 	///@brief X axis position of the peak last refresh
 	int64_t m_peakXpos;
@@ -192,14 +195,11 @@ struct PeakLabel
 	///@brief Widest the text has been (in pixels, including padding) during m_shrinkTime
 	float m_shrinkWidth;
 
-	/**
-		@brief Alpha decay. Decays at a fixed rate after the peak disappears
+	///@brief Time (in seconds) since the label was given its current peak
+	float m_age;
 
-		255 = fully visible
-		0 = invisible
-		Negative = invisible for a while (eventually will be garbage collected)
-	 */
-	float m_peakAlpha;
+	///@brief Time (in seconds) a taller peak without a label has been around
+	float m_beatenTime;
 
 	///@brief Calculated FWHM of the peak
 	float m_fwhm;
@@ -566,7 +566,7 @@ protected:
 	void RenderWaterfallWaveform(std::shared_ptr<DisplayedChannel> channel, ImVec2 start, ImVec2 size);
 	void RenderSpectrogramWaveform(std::shared_ptr<DisplayedChannel> channel, ImVec2 start, ImVec2 size);
 	void RenderSpectrumPeaks(ImDrawList* list, std::shared_ptr<DisplayedChannel> channel);
-	void RenderOffscreenPeakMarkers(ImDrawList* list, std::shared_ptr<DisplayedChannel> channel, size_t npeaks);
+	void RenderOffscreenPeakMarkers(ImDrawList* list, std::shared_ptr<DisplayedChannel> channel);
 	void RenderDigitalWaveform(std::shared_ptr<DisplayedChannel> channel, ImVec2 start, ImVec2 size);
 	void RenderProtocolWaveform(std::shared_ptr<DisplayedChannel> channel, ImVec2 start, ImVec2 size);
 	void RenderDigitalBusWaveform(std::shared_ptr<DisplayedChannel> channel, ImVec2 start, ImVec2 size);
@@ -777,6 +777,9 @@ protected:
 
 	///@brief Height of a channel button
 	float m_channelButtonHeight;
+
+	///@brief Bottom of the channel buttons in the top left corner of the plot (screen coordinates, last frame)
+	float m_channelButtonsBottom;
 
 	PeakLabel* GetDragPeakLabel();
 
