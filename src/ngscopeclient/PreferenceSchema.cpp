@@ -613,15 +613,16 @@ void PreferenceManager::InitializeDefaults()
 					.EnumValue("Single window", VIEWPORT_DISABLE)
 				);
 			windows.AddPreference(
-				Preference::Enum("startup_mode", STARTUP_MODE_WINDOWED)
+				Preference::Enum("startup_mode", STARTUP_MODE_LAST_STATE)
 					.Label("Window startup mode")
 					.Description(
 						"Specifies the way Ngscopeclient window should be opened at startup.\n"
 						"\n"
-						"The default is windowed: the application is started in a fixed 1280x720 window.\n"
+						"The default is Last State: the window is restored at the last position and size\n"
+						"(or maximized on the main screen if there is no valid saved position).\n"
 						"Other options are:\n"
-						" - Maximized: the window is maximized on the main screen,\n"
-						" - Last State: the window is restored at the last position and size.\n"
+						" - Windowed: the application is started in a fixed 1280x720 window,\n"
+						" - Maximized: the window is maximized on the main screen.\n"
 						)
 					.EnumValue("Windowed", STARTUP_MODE_WINDOWED)
 					.EnumValue("Maximized", STARTUP_MODE_MAXIMIZED)
@@ -652,7 +653,7 @@ void PreferenceManager::InitializeDefaults()
 
 		auto& iio = drivers.AddCategory("IIO SDR");
 			iio.AddPreference(
-				Preference::Real("sweep_step", 0.8)
+				Preference::Real("sweep_step", 0.5)
 					.Label("Sweep step")
 					.Description(
 					"How far the LO moves between captures when sweeping a span wider than the radio can capture at "
