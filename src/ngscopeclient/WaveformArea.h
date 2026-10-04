@@ -521,6 +521,8 @@ public:
 	StreamDescriptor GetChannelBeingDragged();
 
 	void AutofitVertical();
+	void ResetOffset();
+	float RoundRangeForGrid(float range);
 
 	/**
 		@brief Gets the WaveformGroup for this area
@@ -636,6 +638,9 @@ protected:
 	float YAxisUnitsToYPosition(float volt);
 	float YPositionToYAxisUnits(float y);
 	float PickStepSize(float volts_per_half_span, int min_steps = 2, int max_steps = 5);
+	int GetVerticalDivisions();
+	bool IsFixedVerticalGrid(StreamDescriptor stream);
+	bool UseAbsoluteYAxisLabels(StreamDescriptor stream);
 
 public:
 	StreamDescriptor GetFirstAnalogStream();

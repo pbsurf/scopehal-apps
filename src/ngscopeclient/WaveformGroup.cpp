@@ -50,6 +50,7 @@ WaveformGroup::WaveformGroup(MainWindow* parent, const string& title)
 	, m_xpos(0)
 	, m_width(0)
 	, m_pixelsPerXUnit(0.00005)
+	, m_lastPlotWidth(0)
 	, m_xAxisOffset(0)
 	, m_snapZoomWheel(0)
 	, m_title(title)
@@ -248,11 +249,36 @@ bool WaveformGroup::Render()
 	ImVec2 clientArea = ImGui::GetContentRegionAvail();
 	m_width = clientArea.x;
 
-	//Don't show more than we can handle if the window got wider (or a saved session was zoomed out farther)
-	m_pixelsPerXUnit = max(m_pixelsPerXUnit, GetMinPixelsPerXUnit());
-
 	float yAxisWidthSpaced = GetYAxisWidth() + GetSpacing();
 	float plotWidth = clientArea.x - yAxisWidthSpaced;
+
+	//With a fixed grid, resizing the plot keeps the time per division and stretches the waveform, like the screen of a
+	//scope, rather than keeping the time per pixel. The center of the plot stays where it was.
+	if(IsFixedGrid() && !m_displayingEye && (m_lastPlotWidth > 0) && (plotWidth > 0) && (plotWidth != m_lastPlotWidth))
+	{
+		int64_t center = m_xAxisOffset + PixelsToXAxisUnits(m_lastPlotWidth / 2);
+		m_pixelsPerXUnit *= plotWidth / m_lastPlotWidth;
+		m_xAxisOffset = center - PixelsToXAxisUnits(plotWidth / 2);
+		ClearPersistence();
+	}
+	if(plotWidth > 0)
+		m_lastPlotWidth = plotWidth;
+
+	//Don't show more than we can handle if the window got wider (or a saved session was zoomed out farther).
+	//With a fixed grid, also put the scale on the 1-2-5 sequence if it isn't already (e.g. from a saved session, or
+	//switching from the adaptive grid), keeping the center of the plot where it was.
+	//(Rounded to the nearest step, not up: a scale set during the last frame may be a hair off a step if the plot
+	//width changed in that frame, such as compact Y axis labels changing width, and must not jump to the next step)
+	float pixelsPerXUnit = LimitPixelsPerXUnit(m_pixelsPerXUnit, plotWidth, true);
+	if( (m_pixelsPerXUnit > 0) && (fabs(pixelsPerXUnit / m_pixelsPerXUnit - 1) > 1e-6) )
+	{
+		int64_t center = m_xAxisOffset + PixelsToXAxisUnits(plotWidth / 2);
+		m_pixelsPerXUnit = pixelsPerXUnit;
+		m_xAxisOffset = center - PixelsToXAxisUnits(plotWidth / 2);
+		ClampXAxisOffset();
+		ClearPersistence();
+	}
+	m_pixelsPerXUnit = pixelsPerXUnit;
 
 	//Update X axis unit
 	// Check if the area has a stream, it could have been moved to another
@@ -279,7 +305,8 @@ bool WaveformGroup::Render()
 		if(firstStream && (firstStream.GetType() == Stream::STREAM_TYPE_CONSTELLATION))
 		{
 			//voltage range is in V, but x axis is in uV because it needs t obe integers
-			auto vrange = firstStream.GetVoltageRange();
+			//(Use the range as displayed on the Y axis, which a fixed grid rounds, so the plot stays square)
+			auto vrange = areas[0]->RoundRangeForGrid(firstStream.GetVoltageRange());
 			m_pixelsPerXUnit = plotWidth / (1e6 * vrange);
 			m_xAxisOffset = -PixelsToXAxisUnits(plotWidth/2);
 			m_displayingEye = true;
@@ -996,6 +1023,22 @@ bool WaveformGroup::IsCompactAxes()
 }
 
 /**
+	@brief Checks if grid lines stay at fixed divisions of the plot, like the graticule of a scope
+ */
+bool WaveformGroup::IsFixedGrid()
+{
+	return m_parent->GetSession().GetPreferences().GetEnum<GridMode>("Appearance.Graphs.grid_mode") == GRID_MODE_FIXED;
+}
+
+/**
+	@brief Gets the number of divisions the plot width is split into, for fixed grids and 1-2-5 zoom steps
+ */
+int WaveformGroup::GetHorizontalDivisions()
+{
+	return clamp((int)m_parent->GetSession().GetPreferences().GetInt("Appearance.Graphs.horizontal_divisions"), 1, 100);
+}
+
+/**
 	@brief Returns the X axis font, scaled down if compact axes are enabled
  */
 FontWithSize WaveformGroup::GetXAxisFont()
@@ -1162,90 +1205,177 @@ void WaveformGroup::RenderTimeline(float width, float height)
 	auto labelFor = [&](double t)
 	{ return m_xAxisUnit.PrettyPrintInt64WithScale(llround(t), scaleReference, Unit::MAX_INT64_DECIMALS); };
 
-	//Figure out about how much time per graduation to use
-	//If the labels don't fit at that spacing, space them out more
-	double min_grad_width = min_label_grad_width;
-	int64_t grad_xunits_rounded = 0;
-	for(int pass = 0; pass < 3; pass++)
+	//Fixed divisions: ticks at even fractions of the plot width, like the graticule of a scope. The center line is
+	//labeled with its value and the others with their offset from it, so the labels stay round and show the scale per
+	//division. Label every 1, 2, 5, 10... divisions so they don't overlap.
+	//The offset labels are dimmed, so the value at the center stands out.
+	//(Some axes show values on every line instead, see UseAbsoluteXAxisLabels())
+	if(IsFixedGrid())
 	{
-		double grad_xunits_nominal = min_grad_width / xscale;
+		int ndivs = GetHorizontalDivisions();
+		double divWidth = width / ndivs;
+		int centerDiv = ndivs / 2;
+		int nsubticks = 5;
 
-		//Round so the division sizes are sane
-		double units_per_grad = grad_xunits_nominal * 1.0 / round_divisor;
-		double base = 5;
-		double log_units = log(units_per_grad) / log(base);
-		double log_units_rounded = ceil(log_units);
-		double units_rounded = pow(base, log_units_rounded);
-		grad_xunits_rounded = round(units_rounded * round_divisor);
-		if(grad_xunits_rounded == 0)
-			break;
-
-		//Check how wide the labels are
-		double first = round(m_xAxisOffset / grad_xunits_rounded) * grad_xunits_rounded;
-		float widest = 0;
-		for(double t = first - grad_xunits_rounded; t < (first + width_xunits + grad_xunits_rounded); t += grad_xunits_rounded)
-			widest = max(widest, ImGui::CalcTextSize(labelFor(t).c_str()).x);
-		double needed = widest + 2*textMargin + ImGui::GetFontSize();
-		if( (grad_xunits_rounded * xscale) >= needed)
-			break;
-
-		min_grad_width = needed;
-	}
-
-	//avoid divide-by-zero in weird cases with no waveform etc
-	if(grad_xunits_rounded == 0)
-	{
-		ImGui::PopFont();
-		ImGui::EndChild();
-		return;
-	}
-
-	//Calculate number of ticks within a division
-	double nsubticks = 5;
-	double subtick = grad_xunits_rounded / nsubticks;
-
-	//Find the start time (rounded as needed)
-	double tstart = round(m_xAxisOffset / grad_xunits_rounded) * grad_xunits_rounded;
-
-	//Print tick marks and labels
-	for(double t = tstart - grad_xunits_rounded; t < (tstart + width_xunits + grad_xunits_rounded); t += grad_xunits_rounded)
-	{
-		double x = (t - m_xAxisOffset) * xscale;
-
-		//Draw fine ticks first (even if the labeled graduation doesn't fit)
-		for(int tick=1; tick < nsubticks; tick++)
+		//Rounded to 4 significant figures, so a scale that isn't in the 1-2-5 sequence doesn't give long labels
+		double unitsPerDiv = divWidth / xscale;
+		if(unitsPerDiv > 0)
 		{
-			double subx = (t - m_xAxisOffset + tick*subtick) * xscale;
-
-			if(subx < 0)
-				continue;
-			if(subx > width)
-				break;
-			m_minorGridX.push_back(subx);
-			subx += pos.x;
-
-			list->PathLineTo(ImVec2(subx, pos.y));
-			list->PathLineTo(ImVec2(subx, pos.y + fineTickLength));
-			list->PathStroke(color, thinLineWidth, ImDrawFlags_None);
+			double digit = pow(10, floor(log10(unitsPerDiv)) - 3);
+			unitsPerDiv = round(unitsPerDiv / digit) * digit;
 		}
 
-		if(x < 0)
-			continue;
-		if(x > width)
-			break;
+		//The center value is only shown to the nearest power of ten units per pixel, since digits finer than a
+		//pixel are noise from where the view happens to be panned to
+		double centerResolution = pow(10, floor(log10(max(1 / xscale, 1.0f))));
+		double centerValue = m_xAxisOffset + centerDiv * divWidth / xscale;
+		centerValue = round(centerValue / centerResolution) * centerResolution;
 
-		//Coarse ticks
-		m_majorGridX.push_back(x);
-		x += pos.x;
-		list->PathLineTo(ImVec2(x, pos.y));
-		list->PathLineTo(ImVec2(x, pos.y + coarseTickLength));
-		list->PathStroke(color, thickLineWidth, ImDrawFlags_None);
+		bool absoluteLabels = UseAbsoluteXAxisLabels();
+		auto labelForDiv = [&](int div)
+		{
+			if(absoluteLabels)
+				return labelFor(centerValue + (div - centerDiv) * unitsPerDiv);
+			if(div == centerDiv)
+				return labelFor(centerValue);
+			auto label = m_xAxisUnit.PrettyPrint((div - centerDiv) * unitsPerDiv);
+			if(div > centerDiv)
+				label = "+" + label;
+			return label;
+		};
 
-		//Render label
-		list->AddText(
-			ImVec2(x + textMargin, labelTop),
-			textcolor,
-			labelFor(t).c_str());
+		auto offsetColor = ScaleAlpha(textcolor, OFFSET_LABEL_ALPHA);
+
+		float widest = 0;
+		for(int div = 0; div < ndivs; div++)
+			widest = max(widest, ImGui::CalcTextSize(labelForDiv(div).c_str()).x);
+		double needed = widest + 2*textMargin + ImGui::GetFontSize();
+		int labelStride = 1;
+		while( (labelStride < ndivs) && (labelStride * divWidth < needed) )
+			labelStride = lround(Step125(labelStride, 1));
+
+		//No tick at the right edge, since there's no room for its label
+		for(int div = 0; div < ndivs; div++)
+		{
+			float x = div * divWidth;
+
+			for(int tick=1; tick < nsubticks; tick++)
+			{
+				float subx = x + tick * divWidth / nsubticks;
+				m_minorGridX.push_back(subx);
+				subx += pos.x;
+
+				list->PathLineTo(ImVec2(subx, pos.y));
+				list->PathLineTo(ImVec2(subx, pos.y + fineTickLength));
+				list->PathStroke(color, thinLineWidth, ImDrawFlags_None);
+			}
+
+			//Coarse ticks (no grid line at the left edge, which is the edge of the plot anyway)
+			if(div > 0)
+				m_majorGridX.push_back(x);
+			x += pos.x;
+			list->PathLineTo(ImVec2(x, pos.y));
+			list->PathLineTo(ImVec2(x, pos.y + coarseTickLength));
+			list->PathStroke(color, thickLineWidth, ImDrawFlags_None);
+
+			if( ( (div - centerDiv) % labelStride) == 0)
+			{
+				list->AddText(
+					ImVec2(x + textMargin, labelTop),
+					( (div == centerDiv) || absoluteLabels) ? textcolor : offsetColor,
+					labelForDiv(div).c_str());
+			}
+		}
+	}
+
+	//Adaptive: ticks at round values
+	else
+	{
+		//Figure out about how much time per graduation to use
+		//If the labels don't fit at that spacing, space them out more
+		double min_grad_width = min_label_grad_width;
+		int64_t grad_xunits_rounded = 0;
+		for(int pass = 0; pass < 3; pass++)
+		{
+			double grad_xunits_nominal = min_grad_width / xscale;
+
+			//Round so the division sizes are sane
+			double units_per_grad = grad_xunits_nominal * 1.0 / round_divisor;
+			double base = 5;
+			double log_units = log(units_per_grad) / log(base);
+			double log_units_rounded = ceil(log_units);
+			double units_rounded = pow(base, log_units_rounded);
+			grad_xunits_rounded = round(units_rounded * round_divisor);
+			if(grad_xunits_rounded == 0)
+				break;
+
+			//Check how wide the labels are
+			double first = round(m_xAxisOffset / grad_xunits_rounded) * grad_xunits_rounded;
+			float widest = 0;
+			for(double t = first - grad_xunits_rounded; t < (first + width_xunits + grad_xunits_rounded); t += grad_xunits_rounded)
+				widest = max(widest, ImGui::CalcTextSize(labelFor(t).c_str()).x);
+			double needed = widest + 2*textMargin + ImGui::GetFontSize();
+			if( (grad_xunits_rounded * xscale) >= needed)
+				break;
+
+			min_grad_width = needed;
+		}
+
+		//avoid divide-by-zero in weird cases with no waveform etc
+		if(grad_xunits_rounded == 0)
+		{
+			ImGui::PopFont();
+			ImGui::EndChild();
+			return;
+		}
+
+		//Calculate number of ticks within a division
+		double nsubticks = 5;
+		double subtick = grad_xunits_rounded / nsubticks;
+
+		//Find the start time (rounded as needed)
+		double tstart = round(m_xAxisOffset / grad_xunits_rounded) * grad_xunits_rounded;
+
+		//Print tick marks and labels
+		for(double t = tstart - grad_xunits_rounded; t < (tstart + width_xunits + grad_xunits_rounded); t += grad_xunits_rounded)
+		{
+			double x = (t - m_xAxisOffset) * xscale;
+
+			//Draw fine ticks first (even if the labeled graduation doesn't fit)
+			for(int tick=1; tick < nsubticks; tick++)
+			{
+				double subx = (t - m_xAxisOffset + tick*subtick) * xscale;
+
+				if(subx < 0)
+					continue;
+				if(subx > width)
+					break;
+				m_minorGridX.push_back(subx);
+				subx += pos.x;
+
+				list->PathLineTo(ImVec2(subx, pos.y));
+				list->PathLineTo(ImVec2(subx, pos.y + fineTickLength));
+				list->PathStroke(color, thinLineWidth, ImDrawFlags_None);
+			}
+
+			if(x < 0)
+				continue;
+			if(x > width)
+				break;
+
+			//Coarse ticks
+			m_majorGridX.push_back(x);
+			x += pos.x;
+			list->PathLineTo(ImVec2(x, pos.y));
+			list->PathLineTo(ImVec2(x, pos.y + coarseTickLength));
+			list->PathStroke(color, thickLineWidth, ImDrawFlags_None);
+
+			//Render label
+			list->AddText(
+				ImVec2(x + textMargin, labelTop),
+				textcolor,
+				labelFor(t).c_str());
+		}
 	}
 
 	RenderTriggerPositionArrows(pos, height);
@@ -1258,7 +1388,7 @@ void WaveformGroup::RenderTimeline(float width, float height)
 		else
 			m_parent->AddStatusHelp("mouse_lmb_drag", "Pan timeline");
 
-		if(ImGui::IsKeyDown(ImGuiMod_Ctrl))
+		if(IsFixedGrid())
 			m_parent->AddStatusHelp("mouse_wheel", "Zoom horizontal axis in 1-2-5 steps per division");
 		else
 			m_parent->AddStatusHelp("mouse_wheel", "Zoom horizontal axis");
@@ -1502,9 +1632,9 @@ void WaveformGroup::OnMouseWheel(float delta, float delta_h)
 
 	int64_t target = XPositionToXAxisUnits(ImGui::GetIO().MousePos.x);
 
-	//Ctrl steps through 1-2-5 scales, otherwise zoom around the mouse
-	if(ImGui::IsKeyDown(ImGuiMod_Ctrl))
-		OnZoomHorizontalSnapped(delta);
+	//With a fixed grid, step through 1-2-5 scales
+	if(IsFixedGrid())
+		OnZoomHorizontalSnapped(target, ImGui::GetIO().MousePos.x, delta);
 	else if(delta > 0)
 		OnZoomInHorizontal(target, pow(1.5, delta));
 	else
@@ -1636,13 +1766,15 @@ void WaveformGroup::OnPanHorizontal(float step)
 /**
 	@brief Zooms the horizontal axis to the next scale in the 1-2-5 sequence, like the timebase knob of a scope
 
-	The plot is treated as 10 divisions wide (e.g. 100 ns/div, 200 ns/div, 500 ns/div...) and zoomed around its
-	center, regardless of the mouse position.
+	The plot is split into the number of divisions set in the preferences (e.g. 100 ns/div, 200 ns/div,
+	500 ns/div...).
 
+	@param target	X axis value to hold in place
+	@param xpos		Screen X position of target
 	@param delta	Mouse wheel steps (positive zooms in). Fractions of a step (e.g. from touchpads) add up until there's a
 					whole step.
  */
-void WaveformGroup::OnZoomHorizontalSnapped(float delta)
+void WaveformGroup::OnZoomHorizontalSnapped(int64_t target, float xpos, float delta)
 {
 	m_snapZoomWheel += delta;
 	int steps = trunc(m_snapZoomWheel);
@@ -1655,13 +1787,13 @@ void WaveformGroup::OnZoomHorizontalSnapped(float delta)
 		return;
 
 	//Zooming in is fewer X axis units per division
-	double unitsPerDiv = Step125(plotWidth / (10 * m_pixelsPerXUnit), -steps);
+	int ndivs = GetHorizontalDivisions();
+	double unitsPerDiv = Step125(plotWidth / (ndivs * m_pixelsPerXUnit), -steps);
 
 	//X axis units are integers (e.g. fs), so don't go below one per division
 	unitsPerDiv = max(unitsPerDiv, 1.0);
 
-	float center = m_xpos + plotWidth/2;
-	ZoomHorizontalAround(XPositionToXAxisUnits(center), center, plotWidth / (10 * unitsPerDiv));
+	ZoomHorizontalAround(target, xpos, plotWidth / (ndivs * unitsPerDiv));
 }
 
 /**
@@ -1837,6 +1969,8 @@ YAML::Node WaveformGroup::SerializeConfiguration(IDTable& table)
 /**
 	@brief Zooms so the specified range of X axis units fills the plot
 
+	With a fixed grid, the scale is rounded up to the 1-2-5 sequence, and the range is centered in the plot.
+
 	@param start	Timestamp (or other X axis value) for the left edge of the plot
 	@param end		Timestamp for the right edge of the plot
 	@param width	Width of the plot, in pixels
@@ -1846,10 +1980,41 @@ void WaveformGroup::ZoomToXRange(int64_t start, int64_t end, float width)
 	if(end <= start)
 		return;
 
-	m_pixelsPerXUnit = max(width / (end - start), GetMinPixelsPerXUnit());
-	m_xAxisOffset = start;
+	m_pixelsPerXUnit = LimitPixelsPerXUnit(width / (end - start), width);
+	if(IsFixedGrid())
+		m_xAxisOffset = start + (end - start)/2 - PixelsToXAxisUnits(width/2);
+	else
+		m_xAxisOffset = start;
 	ClampXAxisOffset();
 	ClearPersistence();
+}
+
+/**
+	@brief Limits a horizontal scale to what we can display
+
+	With a fixed grid, the time per division is also put on the 1-2-5 sequence, so every way of changing the scale
+	keeps it there.
+
+	@param pixelsPerXUnit	Requested scale
+	@param width			Width of the plot, in pixels
+	@param roundNearest		With a fixed grid, round the time per division to the nearest value in the sequence
+							(for continuous zoom gestures) rather than up (so everything requested fits)
+ */
+float WaveformGroup::LimitPixelsPerXUnit(float pixelsPerXUnit, float width, bool roundNearest)
+{
+	if(!IsFixedGrid() || m_displayingEye || (width <= 0) || (pixelsPerXUnit <= 0) )
+		return max(pixelsPerXUnit, GetMinPixelsPerXUnit());
+
+	int ndivs = GetHorizontalDivisions();
+	double unitsPerDiv = width / (ndivs * pixelsPerXUnit);
+	unitsPerDiv = roundNearest ? Round125(unitsPerDiv) : Ceil125(unitsPerDiv);
+
+	//X axis units are integers (e.g. fs), so don't go below one per division,
+	//and don't show more than MAX_X_SPAN (the largest value in the sequence that fits)
+	unitsPerDiv = max(unitsPerDiv, 1.0);
+	unitsPerDiv = min(unitsPerDiv, Floor125(static_cast<double>(MAX_X_SPAN) / ndivs));
+
+	return width / (ndivs * unitsPerDiv);
 }
 
 /**
@@ -1858,13 +2023,15 @@ void WaveformGroup::ZoomToXRange(int64_t start, int64_t end, float width)
 	@param target			X axis value to hold in place
 	@param xpos				Screen X position that target should end up at
 	@param pixelsPerXUnit	New horizontal scale
+	@param roundNearest		With a fixed grid, round the scale to the nearest 1-2-5 step rather than zooming out to
+							the next one (see LimitPixelsPerXUnit())
  */
-void WaveformGroup::ZoomHorizontalAround(int64_t target, float xpos, float pixelsPerXUnit)
+void WaveformGroup::ZoomHorizontalAround(int64_t target, float xpos, float pixelsPerXUnit, bool roundNearest)
 {
 	if(pixelsPerXUnit <= 0)
 		return;
 
-	m_pixelsPerXUnit = max(pixelsPerXUnit, GetMinPixelsPerXUnit());
+	m_pixelsPerXUnit = LimitPixelsPerXUnit(pixelsPerXUnit, GetPlotWidth(), roundNearest);
 	m_xAxisOffset = target - PixelsToXAxisUnits(xpos - m_xpos);
 	ClampXAxisOffset();
 	ClearPersistence();
@@ -1942,6 +2109,46 @@ void WaveformGroup::ClampXAxisOffset()
 		m_xAxisOffset = 0;
 }
 
+/**
+	@brief Checks if a fixed X axis grid should label every line with its value, rather than the center line with its
+	value and the others with their offset from it
+
+	Time axes, and spectra centered on a frequency (e.g. from a heterodyne receiver such as an SDR, where the center is
+	the tuned frequency and the offsets show the span), use offsets. Spectra which all start at 0 Hz (e.g. the FFT of
+	a real valued signal, where the view is kept from scrolling below 0 Hz so the values come out round) and axes in
+	other units (e.g. the voltage axis of a histogram) show values.
+ */
+bool WaveformGroup::UseAbsoluteXAxisLabels()
+{
+	auto type = m_xAxisUnit.GetType();
+	if(type == Unit::UNIT_FS)
+		return false;
+	if( (type != Unit::UNIT_HZ) && (type != Unit::UNIT_MICROHZ) )
+		return true;
+
+	//Spectra: values only if every one starts at 0 Hz (if there's no data yet, assume centered)
+	bool dataFound = false;
+	auto areas = GetWaveformAreas();
+	for(auto a : areas)
+	{
+		for(size_t i=0; i<a->GetStreamCount(); i++)
+		{
+			auto data = a->GetStream(i).GetData();
+			if( (data == nullptr) || (data->size() == 0) )
+				continue;
+			auto sdata = dynamic_cast<SparseWaveformBase*>(data);
+			auto udata = dynamic_cast<UniformWaveformBase*>(data);
+			if(!sdata && !udata)
+				continue;
+
+			if(GetOffsetScaled(sdata, udata, 0) != 0)
+				return false;
+			dataFound = true;
+		}
+	}
+	return dataFound;
+}
+
 void WaveformGroup::AutofitHorizontal(float width)
 {
 	LogTrace("horizontal autoscale\n");
@@ -1992,11 +2199,7 @@ void WaveformGroup::AutofitHorizontal(float width)
 	int64_t sigwidth = end - start;
 
 	//Don't divide by zero if no data!
+	//(With a fixed grid, the scale is rounded up to the 1-2-5 sequence and the waveform centered)
 	if( dataFound && (sigwidth > 1) )
-	{
-		m_pixelsPerXUnit = max(width / sigwidth, GetMinPixelsPerXUnit());
-		m_xAxisOffset = start;
-		ClampXAxisOffset();
-		ClearPersistence();
-	}
+		ZoomToXRange(start, end, width);
 }

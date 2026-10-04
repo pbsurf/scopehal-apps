@@ -588,6 +588,19 @@ bool IsColorDark(ImU32 bgColor)
 }
 
 /**
+	@brief Scales the opacity of a color, e.g. to draw secondary text more faintly
+
+	@param color	The color
+	@param scale	Factor for its alpha channel (0 to 1)
+ */
+ImU32 ScaleAlpha(ImU32 color, float scale)
+{
+	ImU32 alpha = (color >> IM_COL32_A_SHIFT) & 0xff;
+	alpha = lround(alpha * clamp(scale, 0.0f, 1.0f));
+	return (color & ~IM_COL32_A_MASK) | (alpha << IM_COL32_A_SHIFT);
+}
+
+/**
 	@brief Steps a positive value along the 1-2-5 sequence (..., 0.5, 1, 2, 5, 10, 20, ...) used by scope knobs
 
 	A value that isn't in the sequence goes to the nearest value in the sequence in the direction of the step, so the
@@ -624,4 +637,35 @@ double Step125(double value, int steps)
 	//Floor division, so negative indexes (values below 1) work too
 	exp = (index >= 0) ? (index / 3) : -((2 - index) / 3);
 	return mantissas[index - 3*exp] * pow(10, exp);
+}
+
+/**
+	@brief Rounds a positive value up to the 1-2-5 sequence (..., 0.5, 1, 2, 5, 10, 20, ...) used by scope knobs
+
+	A value already in the sequence is kept as it is.
+ */
+double Ceil125(double value)
+{
+	//A step down then up lands on the value itself if it's in the sequence, otherwise on the next value above it
+	return Step125(Step125(value, -1), 1);
+}
+
+/**
+	@brief Rounds a positive value down to the 1-2-5 sequence (..., 0.5, 1, 2, 5, 10, 20, ...) used by scope knobs
+
+	A value already in the sequence is kept as it is.
+ */
+double Floor125(double value)
+{
+	return Step125(value, 0);
+}
+
+/**
+	@brief Rounds a positive value to the nearest value in the 1-2-5 sequence, by ratio (so 1.5 goes to 2, not 1)
+ */
+double Round125(double value)
+{
+	double below = Floor125(value);
+	double above = Ceil125(value);
+	return (value / below < above / value) ? below : above;
 }

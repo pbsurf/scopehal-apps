@@ -720,6 +720,49 @@ float WaveformArea::YPositionToYAxisUnits(float y)
 	return PixelsToYAxisUnits(-1 * (y - m_ymid) ) - m_yAxisOffset;
 }
 
+/**
+	@brief Checks if a fixed Y axis grid for a stream should label every line with its value, rather than the center
+	line with its value and the others with their offset from it
+
+	Offsets are only used for time domain analog waveforms in volts, amps, or watts, whose offset is often adjusted.
+	Everything else (e.g. spectra, which are read as absolute levels like on a spectrum analyzer, or histograms) shows
+	values.
+ */
+bool WaveformArea::UseAbsoluteYAxisLabels(StreamDescriptor stream)
+{
+	if(stream.GetType() != Stream::STREAM_TYPE_ANALOG)
+		return true;
+	if(stream.GetXAxisUnits().GetType() != Unit::UNIT_FS)
+		return true;
+
+	auto yunit = stream.GetYAxisUnits().GetType();
+	return (yunit != Unit::UNIT_VOLTS) && (yunit != Unit::UNIT_AMPS) && (yunit != Unit::UNIT_WATTS);
+}
+
+/**
+	@brief Gets the number of divisions the plot height is split into, for fixed grids and 1-2-5 range steps
+ */
+int WaveformArea::GetVerticalDivisions()
+{
+	auto& prefs = m_parent->GetSession().GetPreferences();
+	return clamp((int)prefs.GetInt("Appearance.Graphs.vertical_divisions"), 1, 100);
+}
+
+/**
+	@brief Checks if the grid for a stream stays at fixed divisions of the plot height, like the graticule of a scope
+
+	Units whose labels aren't linear values (log BER, hex) always use the adaptive grid.
+ */
+bool WaveformArea::IsFixedVerticalGrid(StreamDescriptor stream)
+{
+	auto& prefs = m_parent->GetSession().GetPreferences();
+	if(prefs.GetEnum<GridMode>("Appearance.Graphs.grid_mode") != GRID_MODE_FIXED)
+		return false;
+
+	auto unit = stream.GetYAxisUnits();
+	return (unit != Unit::UNIT_LOG_BER) && (unit != Unit::UNIT_HEXNUM);
+}
+
 float WaveformArea::PickStepSize(float volts_per_half_span, int min_steps, int max_steps)
 {
 	static const float steps[3] = {1, 2, 5};
@@ -818,7 +861,9 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 		if( (m_dragState != DRAG_STATE_Y_AXIS) && (m_dragState != DRAG_STATE_PAN) )
 			m_yAxisOffset = first.GetOffset();
 
-		m_pixelsPerYAxisUnit = unspacedHeightPerArea / first.GetVoltageRange();
+		//With a fixed grid, the displayed range is rounded up to the 1-2-5 sequence even if the stream's isn't
+		//(e.g. set in a dialog, or coerced by an instrument), without changing the stream
+		m_pixelsPerYAxisUnit = unspacedHeightPerArea / RoundRangeForGrid(first.GetVoltageRange());
 		m_yAxisUnit = first.GetYAxisUnits();
 	}
 
@@ -965,7 +1010,7 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 	//Handle help messages
 	if(ImGui::IsItemHovered() && !m_mouseOverButton)
 	{
-		if(ImGui::IsKeyDown(ImGuiMod_Ctrl))
+		if(m_group->IsFixedGrid())
 			m_parent->AddStatusHelp("mouse_wheel", "Zoom horizontal axis in 1-2-5 steps per division");
 		else
 			m_parent->AddStatusHelp("mouse_wheel", "Zoom horizontal axis");
@@ -997,7 +1042,7 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 	//Update scale again in case we had a mouse wheel event
 	//(we need scale to be accurate for the re-render in the background thread)
 	if(first)
-		m_pixelsPerYAxisUnit = unspacedHeightPerArea / first.GetVoltageRange();
+		m_pixelsPerYAxisUnit = unspacedHeightPerArea / RoundRangeForGrid(first.GetVoltageRange());
 
 	if(m_inputs.empty())
 		return false;
@@ -3610,64 +3655,87 @@ void WaveformArea::RenderGrid(ImVec2 start, ImVec2 size, map<float, float>& grid
 		return;
 	}
 
-	float theight = ImGui::GetFontSize();
-
-	//Decide what voltage step to use. Pick from a list (in volts)
-	int min_steps = 1;								//Always have at least one division
-	int max_steps = floor(halfheight / theight);	//Do not have more divisions than can fit given our font size
-	max_steps = min(max_steps, 10);					//Do not have more than ten divisions regardless of font size
-	float selected_step = PickStepSize(volts_per_half_span, min_steps, max_steps);
-
-	//Special case a few scenarios
-	if(stream.GetYAxisUnits() == Unit::UNIT_LOG_BER)
-		selected_step = 2;
-	if(stream.GetYAxisUnits() == Unit::UNIT_HEXNUM)
-	{
-		//round to next power of two
-		selected_step = pow(2, round(log2(selected_step)));
-	}
-
-
-	float bottom_edge = (ybot - theight/2);
-	float top_edge = (ytop + theight/2);
-
-	//Offset things so that the grid lines are at sensible locations
+	//Range of the plot in Y axis units, and where Y=0 is
 	vbot = YPositionToYAxisUnits(ybot);
 	vtop = YPositionToYAxisUnits(ytop);
-	float vmid = (vbot + vtop)/2;
 	float yzero = YAxisUnitsToYPosition(0);
-	float zero_offset = fmodf(vmid, selected_step);
-	vmid -= zero_offset;
 
-	//Calculate grid positions
-	size_t igrid = 0;
-	for(float dv=0; ; dv += selected_step)
+	//Fixed divisions: lines at even fractions of the plot height, like the graticule of a scope.
+	//(No lines at the top and bottom edges, which are the edges of the plot anyway)
+	if(IsFixedVerticalGrid(stream))
 	{
-		float vp = vmid + dv;
-		float vn = vmid - dv;
+		int ndivs = GetVerticalDivisions();
+		float divHeight = size.y / ndivs;
 
-		float yt = YAxisUnitsToYPosition(vp);
-		float yb = YAxisUnitsToYPosition(vn);
-
-		if(dv != 0)
+		//If the lines would be too close together to tell apart, don't draw any
+		if(divHeight >= 3)
 		{
-			if( (yb <= bottom_edge) && (yb >= top_edge ) )
-				gridmap[vn] = yb;
-
-			if( (yt <= bottom_edge ) && (yt >= top_edge) )
-				gridmap[vp] = yt;
+			for(int i=1; i<ndivs; i++)
+			{
+				float y = ytop + i*divHeight;
+				gridmap[YPositionToYAxisUnits(y)] = y;
+			}
 		}
-		else
-			gridmap[vp] = yt;
+	}
 
-		//avoid infinite loop if grid settings are borked (zero range etc)
-		igrid ++;
-		if(igrid > 50)
-			break;
+	//Adaptive: lines at round values
+	else
+	{
+		float theight = ImGui::GetFontSize();
 
-		//Stop if we're off the edge
-		if( (yb > ybot) && (yt < ytop) )
-			break;
+		//Decide what voltage step to use. Pick from a list (in volts)
+		int min_steps = 1;								//Always have at least one division
+		int max_steps = floor(halfheight / theight);	//Do not have more divisions than can fit given our font size
+		max_steps = min(max_steps, 10);					//Do not have more than ten divisions regardless of font size
+		float selected_step = PickStepSize(volts_per_half_span, min_steps, max_steps);
+
+		//Special case a few scenarios
+		if(stream.GetYAxisUnits() == Unit::UNIT_LOG_BER)
+			selected_step = 2;
+		if(stream.GetYAxisUnits() == Unit::UNIT_HEXNUM)
+		{
+			//round to next power of two
+			selected_step = pow(2, round(log2(selected_step)));
+		}
+
+		float bottom_edge = (ybot - theight/2);
+		float top_edge = (ytop + theight/2);
+
+		//Offset things so that the grid lines are at sensible locations
+		float vmid = (vbot + vtop)/2;
+		float zero_offset = fmodf(vmid, selected_step);
+		vmid -= zero_offset;
+
+		//Calculate grid positions
+		size_t igrid = 0;
+		for(float dv=0; ; dv += selected_step)
+		{
+			float vp = vmid + dv;
+			float vn = vmid - dv;
+
+			float yt = YAxisUnitsToYPosition(vp);
+			float yb = YAxisUnitsToYPosition(vn);
+
+			if(dv != 0)
+			{
+				if( (yb <= bottom_edge) && (yb >= top_edge ) )
+					gridmap[vn] = yb;
+
+				if( (yt <= bottom_edge ) && (yt >= top_edge) )
+					gridmap[vp] = yt;
+			}
+			else
+				gridmap[vp] = yt;
+
+			//avoid infinite loop if grid settings are borked (zero range etc)
+			igrid ++;
+			if(igrid > 50)
+				break;
+
+			//Stop if we're off the edge
+			if( (yb > ybot) && (yt < ytop) )
+				break;
+		}
 	}
 
 	beginGridLines();
@@ -3731,6 +3799,8 @@ void WaveformArea::RenderYAxis(ImVec2 size, map<float, float>& gridmap, float vb
 	{
 		if(ImGui::MenuItem("Autofit"))
 			AutofitVertical();
+		if(ImGui::MenuItem("Reset offset"))
+			ResetOffset();
 		ImGui::EndPopup();
 	}
 
@@ -3751,7 +3821,8 @@ void WaveformArea::RenderYAxis(ImVec2 size, map<float, float>& gridmap, float vb
 		{
 			m_parent->AddStatusHelp("mouse_lmb_drag", "Adjust offset");
 			m_parent->AddStatusHelp("mouse_mmb", "Autofit range and offset");
-			if(ImGui::IsKeyDown(ImGuiMod_Ctrl))
+			auto stream = GetFirstAnalogOrDensityStream();
+			if(stream && IsFixedVerticalGrid(stream))
 				m_parent->AddStatusHelp("mouse_wheel", "Adjust range in 1-2-5 steps per division");
 			else
 				m_parent->AddStatusHelp("mouse_wheel", "Adjust range");
@@ -3761,22 +3832,66 @@ void WaveformArea::RenderYAxis(ImVec2 size, map<float, float>& gridmap, float vb
 	//Draw text for the Y axis labels
 	float xmargin = 5;
 	m_yAxisLabelWidth = 0;
+
+	//With fixed divisions, the center line is labeled with its value and the others with their offset from it, so the
+	//labels stay round and show the scale per division. The offset labels are dimmed, so the value stands out.
+	//(Some streams show values on every line instead, see UseAbsoluteYAxisLabels())
+	//Label every 1, 2, 5, 10... divisions so they don't overlap.
+	auto stream = GetFirstAnalogOrDensityStream();
+	bool fixedGrid = stream && IsFixedVerticalGrid(stream);
+	bool offsetLabels = fixedGrid && !UseAbsoluteYAxisLabels(stream);
+	int ndivs = GetVerticalDivisions();
+	float divHeight = m_plotSize.y / ndivs;
+	int centerDiv = ndivs / 2;
+	double voltsPerDiv = 0;
+	int labelStride = 1;
+	if(fixedGrid)
+	{
+		voltsPerDiv = RoundRangeForGrid(stream.GetVoltageRange()) / ndivs;
+
+		float minSpacing = 1.2 * ImGui::GetFontSize();
+		while( (labelStride < ndivs) && (labelStride * divHeight < minSpacing) )
+			labelStride = lround(Step125(labelStride, 1));
+	}
+
+	auto offsetColor = ScaleAlpha(textColor, WaveformGroup::OFFSET_LABEL_ALPHA);
+
 	for(auto it : gridmap)
 	{
-		float vlo = YPositionToYAxisUnits(it.second - 0.5);
-		float vhi = YPositionToYAxisUnits(it.second + 0.5);
-		auto label = m_yAxisUnit.PrettyPrintRange(vlo, vhi, vbot, vtop);
+		string label;
+		bool isOffset = false;
+		if(fixedGrid)
+		{
+			//Divisions above the center line, from the line's position
+			int div = centerDiv - (int)lround( (it.second - m_plotPos.y) / divHeight);
+			if( (div % labelStride) != 0)
+				continue;
+
+			if( (div != 0) && offsetLabels)
+			{
+				label = m_yAxisUnit.PrettyPrint(div * voltsPerDiv);
+				if(div > 0)
+					label = "+" + label;
+				isOffset = true;
+			}
+		}
+		if(label.empty())
+		{
+			float vlo = YPositionToYAxisUnits(it.second - 0.5);
+			float vhi = YPositionToYAxisUnits(it.second + 0.5);
+			label = m_yAxisUnit.PrettyPrintRange(vlo, vhi, vbot, vtop);
+		}
 
 		auto tsize = ImGui::CalcTextSize(label.c_str());
 		float y = it.second - tsize.y/2;
-		if(y > ybot)
-			continue;
-		if(y < ytop)
-			continue;
-
-		m_yAxisLabelWidth = max(m_yAxisLabelWidth, tsize.x);
-
-		draw_list->AddText(ImVec2(origin.x + size.x - tsize.x - xmargin, y), textColor, label.c_str());
+		if( (y <= ybot) && (y >= ytop) )
+		{
+			m_yAxisLabelWidth = max(m_yAxisLabelWidth, tsize.x);
+			draw_list->AddText(
+				ImVec2(origin.x + size.x - tsize.x - xmargin, y),
+				isOffset ? offsetColor : textColor,
+				label.c_str());
+		}
 	}
 
 	ImGui::PopFont();
@@ -5516,7 +5631,7 @@ void WaveformArea::ApplyZoomBox()
 		float vtop = YPositionToYAxisUnits(top);
 		float vbottom = YPositionToYAxisUnits(bottom);
 		float mid = (vtop + vbottom) / 2;
-		float range = vtop - vbottom;
+		float range = RoundRangeForGrid(vtop - vbottom);
 		for(auto& c : m_inputs)
 		{
 			c->m_sourceStream.SetOffset(-mid);
@@ -5658,9 +5773,9 @@ void WaveformArea::OnMouseWheelPlotArea(float delta, float delta_h)
 	//If we have both X and Y deltas, use the larger one and ignore incidental movement in the other axis
 	if(fabs(delta) > fabs(delta_h) )
 	{
-		//Ctrl steps through 1-2-5 scales, otherwise zoom around the mouse
-		if(ImGui::IsKeyDown(ImGuiMod_Ctrl))
-			m_group->OnZoomHorizontalSnapped(delta);
+		//With a fixed grid, step through 1-2-5 scales
+		if(m_group->IsFixedGrid())
+			m_group->OnZoomHorizontalSnapped(target, ImGui::GetIO().MousePos.x, delta);
 		else if(delta > 0)
 			m_group->OnZoomInHorizontal(target, pow(1.5, delta));
 		else
@@ -5732,7 +5847,7 @@ void WaveformArea::OnTapZoomDrag()
 	float scale = m_tapZoomStartScale * pow(1.5, dy / pixelsPerStep);
 	if(scale != m_group->GetPixelsPerXUnit())
 	{
-		m_group->ZoomHorizontalAround(m_tapZoomAnchor, m_tapZoomStart.x, scale);
+		m_group->ZoomHorizontalAround(m_tapZoomAnchor, m_tapZoomStart.x, scale, true);
 		m_parent->SetNeedRender();
 	}
 }
@@ -5740,9 +5855,9 @@ void WaveformArea::OnTapZoomDrag()
 /**
 	@brief Handles a mouse wheel scroll step on the Y axis
 
-	With Ctrl held, the range steps through the 1-2-5 sequence like the V/div knob of a scope, with the plot treated as
-	10 divisions high (e.g. 100 mV/div, 200 mV/div, 500 mV/div...). Fractions of a step (e.g. from touchpads) add up
-	until there's a whole step.
+	With a fixed grid, the range steps through the 1-2-5 sequence like the V/div knob of a scope, with the plot split
+	into the number of divisions set in the preferences (e.g. 100 mV/div, 200 mV/div, 500 mV/div...). Fractions of a
+	step (e.g. from touchpads) add up until there's a whole step.
 
 	@param delta	Mouse wheel steps (positive zooms in)
 	@param zoomBase	Factor the range is multiplied by for each step in, when not snapping to 1-2-5 steps
@@ -5765,7 +5880,7 @@ void WaveformArea::OnMouseWheelYAxis(float delta, float zoomBase)
 	stream = GetFirstAnalogOrDensityStream();
 
 	auto range = stream.GetVoltageRange();
-	if(ImGui::IsKeyDown(ImGuiMod_Ctrl))
+	if(stream && IsFixedVerticalGrid(stream))
 	{
 		m_snapZoomWheel += delta;
 		int steps = trunc(m_snapZoomWheel);
@@ -5773,8 +5888,9 @@ void WaveformArea::OnMouseWheelYAxis(float delta, float zoomBase)
 		if( (steps == 0) || (range <= 0) )
 			return;
 
-		//Zooming in is fewer volts per division
-		range = 10 * Step125(range / 10, -steps);
+		//Zooming in is fewer volts per division (stepping from the displayed range)
+		int ndivs = GetVerticalDivisions();
+		range = ndivs * Step125(RoundRangeForGrid(range) / ndivs, -steps);
 	}
 	else if(delta > 0)
 		range *= pow(zoomBase, delta);
@@ -5930,7 +6046,7 @@ void WaveformArea::AutofitVertical()
 	if(found)
 	{
 		auto off = (vmax + vmin) / 2;
-		auto range = (vmax - vmin) * 1.05;
+		auto range = RoundRangeForGrid((vmax - vmin) * 1.05);
 		for(auto& c : m_inputs)
 		{
 			c->m_sourceStream.SetOffset(-off);
@@ -5938,6 +6054,33 @@ void WaveformArea::AutofitVertical()
 		}
 	}
 
+	m_parent->SetNeedRender();
+}
+
+/**
+	@brief Rounds a range for the Y axis up to the 1-2-5 sequence per division, if the grid is fixed
+
+	@param range	Range that must fit in the plot
+ */
+float WaveformArea::RoundRangeForGrid(float range)
+{
+	auto stream = GetFirstAnalogOrDensityStream();
+	if(!stream || !IsFixedVerticalGrid(stream) || (range <= 0) )
+		return range;
+
+	int ndivs = GetVerticalDivisions();
+	return ndivs * Ceil125(range / ndivs);
+}
+
+/**
+	@brief Sets the offset of all streams in this area to zero, keeping their range
+ */
+void WaveformArea::ResetOffset()
+{
+	for(auto& c : m_inputs)
+		c->m_sourceStream.SetOffset(0);
+
+	ClearPersistence();
 	m_parent->SetNeedRender();
 }
 

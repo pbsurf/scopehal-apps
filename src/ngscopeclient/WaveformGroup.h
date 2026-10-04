@@ -78,7 +78,7 @@ public:
 	void OnZoomInHorizontal(int64_t target, float step);
 	void OnZoomOutHorizontal(int64_t target, float step);
 	void OnPanHorizontal(float step);
-	void OnZoomHorizontalSnapped(float delta);
+	void OnZoomHorizontalSnapped(int64_t target, float xpos, float delta);
 	void OnPanPixels(float dx);
 	void NavigateToTimestamp(
 		int64_t timestamp,
@@ -140,8 +140,14 @@ public:
 	{ return m_timelineHeight; }
 
 	bool IsCompactAxes();
+	bool IsFixedGrid();
+	int GetHorizontalDivisions();
 	FontWithSize GetXAxisFont();
 	FontWithSize GetYAxisFont();
+
+	///@brief Opacity of the offset labels with a fixed grid, relative to the center label
+	static constexpr float OFFSET_LABEL_ALPHA = 0.6;
+
 	static float GetFontPixelSize(FontWithSize font);
 
 	float GetSpacing()
@@ -201,7 +207,8 @@ public:
 
 	void AutofitHorizontal(float width);
 	void ZoomToXRange(int64_t start, int64_t end, float width);
-	void ZoomHorizontalAround(int64_t target, float xpos, float pixelsPerXUnit);
+	void ZoomHorizontalAround(int64_t target, float xpos, float pixelsPerXUnit, bool roundNearest = false);
+	float LimitPixelsPerXUnit(float pixelsPerXUnit, float width, bool roundNearest = false);
 	void CenterOnXAxisValue(int64_t x);
 
 protected:
@@ -236,6 +243,7 @@ protected:
 	int64_t GetRoundingDivisor(int64_t width_xunits);
 	void OnMouseWheel(float delta, float delta_h);
 	void ClampXAxisOffset();
+	bool UseAbsoluteXAxisLabels();
 	float GetMinPixelsPerXUnit();
 
 	/**
@@ -260,6 +268,9 @@ protected:
 
 	///@brief Display scale factor
 	float m_pixelsPerXUnit;
+
+	///@brief Width of the plot area as of the last frame, to keep the scale per division when it's resized
+	float m_lastPlotWidth;
 
 	///@brief X axis position of the left edge of our view
 	int64_t m_xAxisOffset;

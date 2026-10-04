@@ -455,6 +455,29 @@ void PreferenceManager::InitializeDefaults()
 				.EnumValue("Major", VERTICAL_GRID_MAJOR)
 				.EnumValue("Major and minor", VERTICAL_GRID_MAJOR_MINOR));
 			graphs.AddPreference(
+				Preference::Enum("grid_mode", GRID_MODE_ADAPTIVE)
+				.Label("Grid mode")
+				.Description(
+					"Adaptive: grid lines sit at round values, and move as the waveform is zoomed, panned or offset.\n"
+					"Fixed divisions: grid lines stay at fixed divisions of the plot, like the graticule of a scope. "
+					"On each axis the center line is labeled with its value and the others with their offset from it. "
+					"The scale per division is kept on the 1-2-5 sequence: the mouse wheel steps through it, zooming "
+					"to a box or autoscaling rounds up to it, and a range set elsewhere (e.g. in the channel "
+					"properties) is displayed rounded up to it. Resizing the plot keeps the time per division, "
+					"stretching the waveform.")
+				.EnumValue("Adaptive", GRID_MODE_ADAPTIVE)
+				.EnumValue("Fixed divisions", GRID_MODE_FIXED));
+			graphs.AddPreference(
+				Preference::Int("horizontal_divisions", 10)
+				.Label("Horizontal divisions")
+				.Description(
+					"Number of divisions the plot width is split into, for the fixed divisions grid mode"));
+			graphs.AddPreference(
+				Preference::Int("vertical_divisions", 8)
+				.Label("Vertical divisions")
+				.Description(
+					"Number of divisions the plot height is split into, for the fixed divisions grid mode"));
+			graphs.AddPreference(
 				Preference::Real("grid_dash_length", 0)
 				.Label("Grid dash length")
 				.Description(

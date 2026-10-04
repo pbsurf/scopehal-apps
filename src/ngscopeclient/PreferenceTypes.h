@@ -92,6 +92,12 @@ enum VerticalGridMode
 	VERTICAL_GRID_MAJOR_MINOR
 };
 
+enum GridMode
+{
+	GRID_MODE_ADAPTIVE,
+	GRID_MODE_FIXED
+};
+
 enum IconTheme_t
 {
 	ICON_THEME_LIGHT,
