@@ -322,11 +322,6 @@ TEST_CASE("Filter_SpectrumStitch_IIOSDR")
 		return best;
 	};
 
-	//Same scaling as the Complex FFT: (2A)^2 / 50 ohms, in dBm, give or take some scalloping loss.
-	//The driver takes out the 20 dB gain the mock's AGC runs at.
-	auto expectedDbm = [](double amplitude)
-	{ return 10 * log10(4 * amplitude * amplitude / 50) + 30 - 20; };
-
 	//Run the sweep twice, the second time the ends are trimmed
 	sweep();
 	auto out = sweep();
@@ -338,18 +333,19 @@ TEST_CASE("Filter_SpectrumStitch_IIOSDR")
 	REQUIRE(startHz > center - span/2 - 5000000);
 	REQUIRE(endHz < center + span/2 + 5000000);
 
-	//All three tones are there, at the right level
-	const double tones[][2] = { { 2400500000, 0.5 }, { 2412000000, 0.4 }, { 2437000000, 0.3 } };
+	//All three tones are there, at the right level in dBm (the driver takes out the gain), give or take some
+	//scalloping loss
+	const double tones[][2] = { { 2400500000, -40 }, { 2412000000, -50 }, { 2437000000, -60 } };
 	for(auto& tone : tones)
 	{
 		float level = peakNear(out, tone[0]);
-		REQUIRE(level < expectedDbm(tone[1]) + 0.3);
-		REQUIRE(level > expectedDbm(tone[1]) - 1.5);
+		REQUIRE(level < tone[1] + 0.3);
+		REQUIRE(level > tone[1] - 1.5);
 	}
 
 	//and there's nothing in between
-	REQUIRE(peakNear(out, 2425000000) < expectedDbm(0.3) - 40);
-	REQUIRE(peakNear(out, 2447000000) < expectedDbm(0.3) - 40);
+	REQUIRE(peakNear(out, 2425000000) < -90);
+	REQUIRE(peakNear(out, 2447000000) < -90);
 }
 
 #endif

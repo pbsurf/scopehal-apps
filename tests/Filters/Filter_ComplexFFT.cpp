@@ -305,15 +305,14 @@ TEST_CASE("Filter_ComplexFFT_IIOSDR")
 	REQUIRE(out != nullptr);
 	REQUIRE(out->size() == depth);
 
-	//The strongest thing in the band is the 2.4005 GHz tone, at 0.5 of full scale
+	//The strongest thing in the band is the 2.4005 GHz tone, at -40 dBm
 	size_t peak = FindPeakBin(out);
 	double peakHz = (out->m_triggerPhase + static_cast<int64_t>(peak) * out->m_timescale) / 1e6;
 	double binHz = g_sampleRate / depth;
 	REQUIRE(fabs(peakHz - 2400500000.0) < 2 * binHz);
 
-	//Same power scaling as the spectrogram: (2A)^2 / 50 ohms, in dBm, give or take some scalloping loss.
-	//The driver takes out the 20 dB gain the mock's AGC runs at.
-	const double expectedDbm = 10 * log10(4 * 0.5 * 0.5 / 50) + 30 - 20;
+	//The driver takes out the gain, so that's what it reads, give or take some scalloping loss
+	const double expectedDbm = -40;
 	REQUIRE(out->m_samples[peak] < expectedDbm + 0.3);
 	REQUIRE(out->m_samples[peak] > expectedDbm - 1.5);
 

@@ -76,10 +76,22 @@ static shared_ptr<SCPISDR> MakeSDR(const string& uri, IIOContext*& ctx)
 /**
 	@brief Full scale of the ADC referred to the input, with the mock's AGC running
 
-	The mock's signals are defined as a fraction of full scale at 20 dB gain, which is where its AGC settles. The driver
-	takes the gain out, so the samples are a tenth of that.
+	The AGC settles at 20 dB gain, and the driver takes the gain out, so full scale is a tenth.
  */
 static const double g_mockFullScale = 0.1;
+
+/**
+	@brief Gets the I/Q amplitude at the input of a tone with a given power, the same way the Complex FFT measures it
+	((2A)^2 / 50 ohms)
+ */
+static double InputAmplitude(double dbm)
+{
+	return sqrt(50 * pow(10, (dbm - 30) / 10)) / 2;
+}
+
+//Levels of the mock's tones in the 2.4 GHz band
+static const double g_tone2400 = InputAmplitude(-40);
+static const double g_tone2412 = InputAmplitude(-50);
 
 /**
 	@brief Gets the magnitude of the component of a complex baseband signal at the given frequency, normalized so that
@@ -300,10 +312,9 @@ TEST_CASE("IIOSDR_Acquire")
 	double wanted = ToneMagnitude(i, q, 500000);
 	double image = ToneMagnitude(i, q, -500000);
 	double elsewhere = ToneMagnitude(i, q, 900000);
-	REQUIRE(wanted > 0.45 * g_mockFullScale);
-	REQUIRE(wanted < 0.55 * g_mockFullScale);
-	REQUIRE(image < 0.02 * g_mockFullScale);
-	REQUIRE(elsewhere < 0.02 * g_mockFullScale);
+	REQUIRE(wanted == Catch::Approx(g_tone2400).epsilon(0.1));
+	REQUIRE(image < 0.04 * g_tone2400);
+	REQUIRE(elsewhere < 0.04 * g_tone2400);
 
 	//Every sample is within full scale
 	auto iw = dynamic_cast<UniformAnalogWaveform*>(i);
@@ -322,8 +333,8 @@ TEST_CASE("IIOSDR_Acquire")
 	REQUIRE(sdr->PopPendingWaveform());
 	i = chan->GetData(0);
 	q = chan->GetData(1);
-	REQUIRE(ToneMagnitude(i, q, -500000) > 0.45 * g_mockFullScale);
-	REQUIRE(ToneMagnitude(i, q, 500000) < 0.02 * g_mockFullScale);
+	REQUIRE(ToneMagnitude(i, q, -500000) > 0.9 * g_tone2400);
+	REQUIRE(ToneMagnitude(i, q, 500000) < 0.04 * g_tone2400);
 	REQUIRE(fabs(chan->GetScalarValue(2) - 2401000000.0) < 256);
 
 	//Retune far away so there's nothing in band, only noise
@@ -334,8 +345,8 @@ TEST_CASE("IIOSDR_Acquire")
 	REQUIRE(sdr->PopPendingWaveform());
 	i = chan->GetData(0);
 	q = chan->GetData(1);
-	REQUIRE(ToneMagnitude(i, q, 500000) < 0.02 * g_mockFullScale);
-	REQUIRE(ToneMagnitude(i, q, -500000) < 0.02 * g_mockFullScale);
+	REQUIRE(ToneMagnitude(i, q, 500000) < 0.04 * g_tone2400);
+	REQUIRE(ToneMagnitude(i, q, -500000) < 0.04 * g_tone2400);
 
 	//Sample rate change is reflected in the waveform timing
 	sdr->SetCenterFrequency(0, 2400000000);
@@ -347,7 +358,7 @@ TEST_CASE("IIOSDR_Acquire")
 	i = chan->GetData(0);
 	q = chan->GetData(1);
 	REQUIRE(i->m_timescale == 200000000);
-	REQUIRE(ToneMagnitude(i, q, 500000) > 0.45 * g_mockFullScale);
+	REQUIRE(ToneMagnitude(i, q, 500000) > 0.9 * g_tone2400);
 }
 
 TEST_CASE("IIOSDR_Sweep")
@@ -409,7 +420,7 @@ TEST_CASE("IIOSDR_Sweep")
 	REQUIRE(sdr->AcquireData());
 	REQUIRE(sdr->PopPendingWaveform());
 	REQUIRE(fabs(chan->GetScalarValue(2) - lo2) < 256);
-	REQUIRE(ToneMagnitude(chan->GetData(0), chan->GetData(1), 2412000000 - lo2) > 0.35 * g_mockFullScale);
+	REQUIRE(ToneMagnitude(chan->GetData(0), chan->GetData(1), 2412000000 - lo2) > 0.9 * g_tone2412);
 
 	//Changing some other setting mid sweep doesn't disturb it, and the LO isn't mistaken for the center frequency
 	sdr->SetGainMode(0, "manual");
@@ -629,9 +640,9 @@ TEST_CASE("IIOSDR_TwoChannels")
 	//Both see the tone, RX2 a bit weaker
 	double rx1 = ToneMagnitude(sdr->GetChannel(0)->GetData(0), sdr->GetChannel(0)->GetData(1), 500000);
 	double rx2 = ToneMagnitude(sdr->GetChannel(1)->GetData(0), sdr->GetChannel(1)->GetData(1), 500000);
-	REQUIRE(rx1 > 0.45 * g_mockFullScale);
-	REQUIRE(rx2 > 0.25 * g_mockFullScale);
-	REQUIRE(rx2 < 0.4 * g_mockFullScale);
+	REQUIRE(rx1 > 0.9 * g_tone2400);
+	REQUIRE(rx2 > 0.5 * g_tone2400);
+	REQUIRE(rx2 < 0.8 * g_tone2400);
 
 	//Only RX2 enabled
 	sdr->DisableChannel(0);
@@ -639,8 +650,8 @@ TEST_CASE("IIOSDR_TwoChannels")
 	REQUIRE(sdr->AcquireData());
 	REQUIRE(sdr->PopPendingWaveform());
 	rx2 = ToneMagnitude(sdr->GetChannel(1)->GetData(0), sdr->GetChannel(1)->GetData(1), 500000);
-	REQUIRE(rx2 > 0.25 * g_mockFullScale);
-	REQUIRE(rx2 < 0.4 * g_mockFullScale);
+	REQUIRE(rx2 > 0.5 * g_tone2400);
+	REQUIRE(rx2 < 0.8 * g_tone2400);
 }
 
 TEST_CASE("IIOSDR_RSSI")
@@ -787,8 +798,7 @@ TEST_CASE("IIOSDR_GainCompensated")
 	REQUIRE(sdr->AcquireData());
 	REQUIRE(sdr->PopPendingWaveform());
 	double at20 = ToneMagnitude(chan->GetData(0), chan->GetData(1), 500000);
-	REQUIRE(at20 > 0.045);
-	REQUIRE(at20 < 0.055);
+	REQUIRE(at20 == Catch::Approx(g_tone2400).epsilon(0.1));
 
 	sdr->SetGain(0, 14);
 	sdr->BackgroundProcessing();
@@ -913,7 +923,7 @@ TEST_CASE("IIOSDR_CalibrationFile")
 		REQUIRE(sdr->AcquireData());
 		REQUIRE(sdr->PopPendingWaveform());
 		double mag = ToneMagnitude(chan->GetData(0), chan->GetData(1), 500000);
-		REQUIRE(mag == Catch::Approx(0.5 * g_mockFullScale * pow(10, -2.8 / 20)).epsilon(0.05));
+		REQUIRE(mag == Catch::Approx(g_tone2400 * pow(10, -2.8 / 20)).epsilon(0.05));
 
 		//Whitespace separated
 		TempFile f2("cal.txt", "1e9 1\n2e9 3\n");
@@ -1496,6 +1506,117 @@ TEST_CASE("IIOSDR_TransmitSessionRoundTrip")
 	ReadDDS(ctx2, "TX2_I_F2", freq, scale, phase, raw);
 	REQUIRE(freq == 456000);
 	REQUIRE(raw == 1);
+}
+
+/**
+	@brief Gets the RMS of a complex baseband signal, per rail
+ */
+static double RmsPerRail(WaveformBase* iw, WaveformBase* qw)
+{
+	auto i = dynamic_cast<UniformAnalogWaveform*>(iw);
+	auto q = dynamic_cast<UniformAnalogWaveform*>(qw);
+	i->PrepareForCpuAccess();
+	q->PrepareForCpuAccess();
+	double sum = 0;
+	for(size_t n=0; n<i->size(); n++)
+		sum += i->m_samples[n]*i->m_samples[n] + q->m_samples[n]*q->m_samples[n];
+	return sqrt(sum / (2 * i->size()));
+}
+
+TEST_CASE("IIOSDR_MockLoopback")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9363", ctx);
+	auto chan = sdr->GetChannel(0);
+	sdr->SetSampleDepth(8192);
+
+	//Somewhere with none of the mock's other signals in band
+	sdr->SetCenterFrequency(0, 1000000000);
+	sdr->SetTxLOFrequency(1000000000);
+	sdr->SetGainMode(0, "manual");
+	sdr->SetGain(0, 20);
+
+	auto capture = [&]()
+	{
+		sdr->BackgroundProcessing();
+		sdr->StartSingleTrigger();
+		REQUIRE(sdr->AcquireData());
+		REQUIRE(sdr->PopPendingWaveform());
+	};
+
+	//A tone at -300 kHz, half scale with 10 dB attenuation: +7 - 6 - 10 dBm out, less 30 dB in the loopback
+	sdr->SetTxToneFrequency(0, 0, -300000);
+	sdr->SetTxToneAmplitude(0, 0, 0.5);
+	double expected = InputAmplitude(7 + 20*log10(0.5) - 10 - 30);
+	capture();
+	REQUIRE(ToneMagnitude(chan->GetData(0), chan->GetData(1), -300000) == Catch::Approx(expected).epsilon(0.05));
+	REQUIRE(ToneMagnitude(chan->GetData(0), chan->GetData(1), 300000) < expected / 30);
+
+	//The level doesn't change with the RX gain, since that's taken out
+	for(float gain : { 10.0f, 40.0f })
+	{
+		sdr->SetGain(0, gain);
+		capture();
+		REQUIRE(ToneMagnitude(chan->GetData(0), chan->GetData(1), -300000) ==
+			Catch::Approx(expected).epsilon(0.05));
+	}
+
+	//But too much clips the ADC (the tone is 5.6x full scale at 73 dB)
+	sdr->SetGain(0, 73);
+	capture();
+	REQUIRE(ToneMagnitude(chan->GetData(0), chan->GetData(1), -300000) < 0.5 * expected);
+	sdr->SetGain(0, 20);
+
+	//More transmit attenuation, less signal
+	sdr->SetTxAttenuation(0, 20);
+	capture();
+	REQUIRE(ToneMagnitude(chan->GetData(0), chan->GetData(1), -300000) ==
+		Catch::Approx(expected / sqrt(10)).epsilon(0.05));
+	sdr->SetTxAttenuation(0, 10);
+
+	//Moving the TX LO moves the tone: 200 kHz up puts it at -100 kHz
+	sdr->SetTxLOFrequency(1000200000);
+	capture();
+	REQUIRE(ToneMagnitude(chan->GetData(0), chan->GetData(1), -100000) == Catch::Approx(expected).epsilon(0.05));
+	REQUIRE(ToneMagnitude(chan->GetData(0), chan->GetData(1), -300000) < expected / 30);
+
+	//Out of band, it's gone
+	sdr->SetTxLOFrequency(1100000000);
+	capture();
+	REQUIRE(RmsPerRail(chan->GetData(0), chan->GetData(1)) < expected / 10);
+}
+
+TEST_CASE("IIOSDR_MockNoise")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9363", ctx);
+	auto chan = sdr->GetChannel(0);
+	sdr->SetSampleDepth(65536);
+
+	//Nothing in band, and the transmitter is quiet
+	sdr->SetCenterFrequency(0, 1000000000);
+	sdr->SetTxToneAmplitude(0, 0, 0);
+	sdr->SetGainMode(0, "manual");
+
+	auto noise = [&](float gain)
+	{
+		sdr->SetGain(0, gain);
+		sdr->BackgroundProcessing();
+		sdr->StartSingleTrigger();
+		REQUIRE(sdr->AcquireData());
+		REQUIRE(sdr->PopPendingWaveform());
+		return RmsPerRail(chan->GetData(0), chan->GetData(1));
+	};
+
+	//Thermal noise at the input: -174 dBm/Hz plus a 3 dB noise figure over 2.5 MHz, split between I and Q
+	double rate = sdr->GetSampleRate();
+	double thermal = sqrt(50 * pow(10, (-171.0 - 30) / 10) * rate / 8);
+
+	//At full gain that's most of it, at no gain the ADC's noise swamps it
+	double high = noise(73);
+	REQUIRE(high > thermal);
+	REQUIRE(high < 1.3 * thermal);
+	REQUIRE(noise(0) > 100 * thermal);
 }
 
 #endif
