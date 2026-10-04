@@ -369,6 +369,7 @@ WaveformArea::WaveformArea(StreamDescriptor stream, shared_ptr<WaveformGroup> gr
 	, m_plotPos(0, 0)
 	, m_plotSize(0, 0)
 	, m_panDraggedY(false)
+	, m_yAxisDragOffset(0)
 	, m_tapZoomAnchor(0)
 	, m_tapZoomStartScale(0)
 	, m_tapZoomActive(false)
@@ -960,6 +961,7 @@ bool WaveformArea::Render(int iArea, int numAreas, ImVec2 clientArea)
 			{
 				m_dragState = DRAG_STATE_PAN;
 				m_panDraggedY = false;
+				StartYAxisDrag();
 			}
 		}
 
@@ -3918,6 +3920,7 @@ void WaveformArea::RenderYAxis(ImVec2 size, map<float, float>& gridmap, float vb
 		{
 			LogTrace("Start dragging Y axis\n");
 			m_dragState = DRAG_STATE_Y_AXIS;
+			StartYAxisDrag();
 
 			//If in the tutorial, ungate the wizard
 			auto tutorial = m_parent->GetTutorialWizard();
@@ -5542,11 +5545,49 @@ void WaveformArea::OnMouseUp()
 }
 
 /**
+	@brief Begins a drag that may move the Y axis offset (dragging the Y axis, or panning in the plot)
+ */
+void WaveformArea::StartYAxisDrag()
+{
+	m_yAxisDragOffset = m_yAxisOffset;
+}
+
+/**
+	@brief Gets the step size the Y axis offset snaps to when dragging
+
+	Like the minor ticks on a scope graticule, this is 1/5 of a division (with the division size rounded to the
+	1-2-5 sequence even if the grid is adaptive), so the offset lands on round values.
+
+	@return Step in Y axis units, or zero if the offset should not be snapped
+ */
+float WaveformArea::GetYAxisOffsetStep()
+{
+	auto stream = GetFirstAnalogOrDensityStream();
+	if(!stream)
+		return 0;
+	float range = stream.GetVoltageRange();
+	if(range <= 0)
+		return 0;
+
+	return Ceil125(range / GetVerticalDivisions()) / 5;
+}
+
+/**
 	@brief Moves the Y axis offset by a number of pixels, as when dragging the Y axis or panning vertically
+
+	The offset snaps to discrete steps (see GetYAxisOffsetStep()) unless shift is held.
  */
 void WaveformArea::DragYAxisBy(float dy)
 {
-	m_yAxisOffset -= PixelsToYAxisUnits(dy);
+	m_yAxisDragOffset -= PixelsToYAxisUnits(dy);
+
+	float step = GetYAxisOffsetStep();
+	float offset = m_yAxisDragOffset;
+	if( (step > 0) && !ImGui::IsKeyDown(ImGuiMod_Shift) )
+		offset = round(offset / step) * step;
+	if(offset == m_yAxisOffset)
+		return;
+	m_yAxisOffset = offset;
 
 	for(auto chan : m_inputs)
 	{

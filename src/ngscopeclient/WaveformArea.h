@@ -715,6 +715,9 @@ protected:
 	///@brief True if we moved the Y axis offset during the current DRAG_STATE_PAN
 	bool m_panDraggedY;
 
+	///@brief Y axis offset following the mouse during a drag, before snapping to discrete steps
+	float m_yAxisDragOffset;
+
 	///@brief Where the second tap of a double tap zoom went down (screen coordinates)
 	ImVec2 m_tapZoomStart;
 
@@ -735,8 +738,10 @@ protected:
 
 	void OnMouseWheelPlotArea(float delta, float delta_h);
 	void OnMouseWheelYAxis(float delta, float zoomBase = 0.9f);
+	void StartYAxisDrag();
 	void DragYAxisBy(float dy);
 	void CommitYAxisDrag();
+	float GetYAxisOffsetStep();
 	bool CanPanVertically();
 	bool CanPanVerticallyInPlot();
 	bool YAxisControlsInstrument();
