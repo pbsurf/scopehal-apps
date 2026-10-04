@@ -453,6 +453,11 @@ int main(int argc, char* argv[])
 
 	//Done, clean up
 	g_mainWindow = nullptr;
+
+	//Save preferences explicitly rather than from the PreferenceManager destructor: by the time static objects
+	//are destroyed, function-local statics inside yaml-cpp may already be gone and emitting would crash
+	PreferenceManager::GetPreferences().SavePreferences();
+
 	ScopehalStaticCleanup();
 	return 0;
 }
