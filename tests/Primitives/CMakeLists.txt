@@ -12,6 +12,7 @@ add_executable(Primitives
 	Sampling.cpp
 	UnitFormatting.cpp
 	UnitStepping.cpp
+	UnitTypes.cpp
 )
 
 target_link_libraries(Primitives
