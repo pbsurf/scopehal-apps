@@ -242,6 +242,49 @@ void HistoryManager::Retcon(shared_ptr<Oscilloscope> scope, size_t chan, size_t 
 }
 
 /**
+	@brief Records the current waveforms of an instrument, leaving out any that are already in history
+
+	A history point owns its waveforms (and returns them to the scope's pool when it's destroyed), so the same waveform
+	must never be in two points. That can happen when scopes in different trigger groups are added together, for
+	example when the session is closed: a scope that didn't trigger last still has the waveforms of its own latest
+	point.
+
+	@param scope		The instrument
+	@param recorded		Waveforms already in history
+	@param hist			Gets the streams to record
+
+	@return False if the instrument has waveforms but all of them are already in history (so there's nothing to add)
+ */
+static bool SnapshotScope(
+	shared_ptr<Oscilloscope> scope,
+	const set<WaveformBase*>& recorded,
+	WaveformHistory& hist)
+{
+	bool hasData = false;
+	bool hasNewData = false;
+	for(size_t i=0; i<scope->GetChannelCount(); i++)
+	{
+		auto chan = scope->GetOscilloscopeChannel(i);
+		if(!chan)
+			continue;
+		for(size_t j=0; j<chan->GetStreamCount(); j++)
+		{
+			auto wfm = chan->GetData(j);
+			if(wfm)
+			{
+				hasData = true;
+				if(recorded.find(wfm) != recorded.end())
+					continue;
+				hasNewData = true;
+			}
+			hist[StreamDescriptor(chan, j)] = wfm;
+		}
+	}
+
+	return hasNewData || !hasData;
+}
+
+/**
 	@brief Adds new data to the history
 
 	@param scopes		The instruments to add
@@ -287,6 +330,20 @@ void HistoryManager::AddHistory(
 	if(!foundTimestamp)
 		tp = refTimeIfNoWaveforms;
 
+	//Waveforms already owned by a history point, which must not be added again
+	set<WaveformBase*> recorded;
+	for(auto pt : m_history)
+	{
+		for(auto& it : pt->m_history)
+		{
+			for(auto& jt : it.second)
+			{
+				if(jt.second)
+					recorded.insert(jt.second);
+			}
+		}
+	}
+
 	//If we already have a history point for the same exact timestamp, merge it
 	if(HasHistory(tp))
 	{
@@ -306,17 +363,14 @@ void HistoryManager::AddHistory(
 						continue;
 					}
 
-					LogTrace("Adding history for scope %s\n", scope->m_nickname.c_str());
-
 					WaveformHistory hist;
-					for(size_t i=0; i<scope->GetChannelCount(); i++)
+					if(!SnapshotScope(scope, recorded, hist))
 					{
-						auto chan = scope->GetOscilloscopeChannel(i);
-						if(!chan)
-							continue;
-						for(size_t j=0; j<chan->GetStreamCount(); j++)
-							hist[StreamDescriptor(chan, j)] = chan->GetData(j);
+						LogTrace("Waveforms of scope %s are already in history\n", scope->m_nickname.c_str());
+						continue;
 					}
+
+					LogTrace("Adding history for scope %s\n", scope->m_nickname.c_str());
 					pt->m_history[scope] = hist;
 				}
 			}
@@ -324,6 +378,21 @@ void HistoryManager::AddHistory(
 
 		return;
 	}
+
+	//Collect the waveforms
+	map<shared_ptr<Oscilloscope>, WaveformHistory> hists;
+	for(auto scope : scopes)
+	{
+		WaveformHistory hist;
+		if(SnapshotScope(scope, recorded, hist))
+			hists[scope] = hist;
+		else
+			LogTrace("Waveforms of scope %s are already in history\n", scope->m_nickname.c_str());
+	}
+
+	//Nothing new at all? Don't add an empty point
+	if(hists.empty() && !scopes.empty())
+		return;
 
 	LogTrace("Adding history for %s\n", tp.PrettyPrint().c_str());
 
@@ -333,23 +402,7 @@ void HistoryManager::AddHistory(
 	pt->m_time = tp;
 	pt->m_pinned = pin;
 	pt->m_nickname = nick;
-
-	//Add waveforms
-	for(auto scope : scopes)
-	{
-		WaveformHistory hist;
-
-		for(size_t i=0; i<scope->GetChannelCount(); i++)
-		{
-			auto chan = scope->GetOscilloscopeChannel(i);
-			if(!chan)
-				continue;
-			for(size_t j=0; j<chan->GetStreamCount(); j++)
-				hist[StreamDescriptor(chan, j)] = chan->GetData(j);
-		}
-
-		pt->m_history[scope] = hist;
-	}
+	pt->m_history = hists;
 
 	//TODO: check history size in MB/GB etc
 	//TODO: convert older stuff to disk, free GPU memory, etc?
