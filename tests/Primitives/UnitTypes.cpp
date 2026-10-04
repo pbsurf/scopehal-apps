@@ -259,6 +259,13 @@ TEST_CASE("Unit_Types_PrettyPrintRange")
 		{ Unit::UNIT_PERCENT,	0.12345,	0.12399,	0,		1,			"12.39 %" },
 		{ Unit::UNIT_BYTES,		4660,		4664,		0,		65536,		"4.554 kB" },
 		{ Unit::UNIT_LOG_BER,	125,		133,		0,		1000,		"1e125" },
+
+		//No space after the number for hex and counts, same as PrettyPrint()
+		{ Unit::UNIT_HEXNUM,	125,		133,		0,		1000,		"0x80" },
+		{ Unit::UNIT_COUNTS,	125,		133,		0,		1000,		"130" },
+
+		//Both ends of the pixel print the same
+		{ Unit::UNIT_HEXNUM,	1.3979,		1.4152,		0,		2,			"0x1" },
 	};
 
 	for(auto& c : cases)
@@ -302,16 +309,27 @@ TEST_CASE("Unit_Types_Parse")
 		{ Unit::UNIT_FS,			"1.5 p",		1500,		1500LL },
 		{ Unit::UNIT_FS,			"-3u",			-3e9,		-3000000000LL },
 		{ Unit::UNIT_FS,			"-3m",			-3e12,		-3000000000000LL },
+		{ Unit::UNIT_FS,			"1.5 " MU "s",	1.5e9,		1500000000LL },
+
+		//Digits after the decimal point times the scale of femtoseconds would overflow an int64
+		{ Unit::UNIT_FS,			"1.2345 ps",	1234.5,		1234LL },
+		{ Unit::UNIT_FS,			"1.0004 " MU "s",	1.0004e9,	1000400000LL },
+		{ Unit::UNIT_FS,			"3.3004 fs",	3.3004,		3LL },
+
 		{ Unit::UNIT_PM,			"1.5 pm",		1.5,		1LL },
 		{ Unit::UNIT_PM,			"-3n",			-3000,		-3000LL },
 		{ Unit::UNIT_PM,			"1.5 m",		1.5e12,		1500000000000LL },	//meters, not milli
 		{ Unit::UNIT_PM,			"1.5 k",		1.5e15,		1500000000000000LL },
+		{ Unit::UNIT_PM,			"1.5 " MU "m",	1.5e6,		1500000LL },
 		{ Unit::UNIT_MICROVOLTS,	"1.5 V",		1.5e6,		1500000LL },
 		{ Unit::UNIT_MICROVOLTS,	"1.5 m",		1500,		1500LL },
 		{ Unit::UNIT_MICROVOLTS,	"-3k",			-3e9,		-3000000000LL },
 		{ Unit::UNIT_MICROHZ,		"1.5 Hz",		1.5e6,		1500000LL },
 		{ Unit::UNIT_MICROHZ,		"1.5 G",		1.5e15,		1500000000000000LL },
 		{ Unit::UNIT_MICROHZ,		"-3m",			-3000,		-3000LL },
+		{ Unit::UNIT_MICROAMPS,		"1.5 A",		1.5e6,		1500000LL },
+		{ Unit::UNIT_MICROAMPS,		"1.2345 mA",	1234.5,		1234LL },
+		{ Unit::UNIT_MICROAMPS,		"1.5 " MU "A",	1.5,		1LL },
 		{ Unit::UNIT_MILLIVOLTS,	"1.5 mV",		1.5,		1LL },
 		{ Unit::UNIT_MILLIVOLTS,	"1.5 k",		1500,		1500LL },
 
@@ -352,7 +370,7 @@ TEST_CASE("Unit_Types_RoundTrip")
 	{
 		Unit::UNIT_FS, Unit::UNIT_HZ, Unit::UNIT_VOLTS, Unit::UNIT_PERCENT, Unit::UNIT_DB, Unit::UNIT_DBM,
 		Unit::UNIT_COUNTS, Unit::UNIT_UI, Unit::UNIT_DEGREES, Unit::UNIT_CELSIUS, Unit::UNIT_PM,
-		Unit::UNIT_MILLIVOLTS, Unit::UNIT_MICROVOLTS, Unit::UNIT_MICROHZ, Unit::UNIT_BYTES
+		Unit::UNIT_MILLIVOLTS, Unit::UNIT_MICROVOLTS, Unit::UNIT_MICROHZ, Unit::UNIT_MICROAMPS, Unit::UNIT_BYTES
 	};
 	const double values[] = { 1.5, 1234.5, -1.5e6, 2.4e9, 0.002 };
 
