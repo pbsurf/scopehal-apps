@@ -63,7 +63,7 @@ TEST_CASE("Primitive_UnitPrettyPrintInt64")
 	//Time domain, including negative values
 	REQUIRE(fs.PrettyPrintInt64(5000123456, 9, false) == "5.000123456 " "\xce\xbc" "s");
 	REQUIRE(fs.PrettyPrintInt64(-1500000, 9, false) == "-1.5 ns");
-	REQUIRE(fs.PrettyPrintInt64(0, 9, false) == "0 fs");
+	REQUIRE(fs.PrettyPrintInt64(0, 9, false) == "0 s");
 }
 
 TEST_CASE("Primitive_UnitPrettyPrintInt64WithResolution")

@@ -81,6 +81,16 @@ TEST_CASE("Unit_Types_PrettyPrint")
 		{ Unit::UNIT_HZ,			1e12,			"1 THz",			"1.0000 THz" },
 		{ Unit::UNIT_HZ,			3e15,			"3000 THz",			"3000 THz" },
 		{ Unit::UNIT_HZ,			0.002,			"2 mHz",			"2.000 mHz" },
+		{ Unit::UNIT_VOLTS,			1e-6,			"1 " MU "V",		"1.0000 " MU "V" },
+		{ Unit::UNIT_VOLTS,			4.7e-9,			"4.7 nV",			"4.700 nV" },
+		{ Unit::UNIT_FARADS,		1e-12,			"1 pF",				"1.0000 pF" },
+		{ Unit::UNIT_AMPS,			1e-15,			"1 fA",				"1.0000 fA" },
+
+		//Zero has no prefix
+		{ Unit::UNIT_VOLTS,			0,				"0 V",				"0.0000 V" },
+		{ Unit::UNIT_FS,			0,				"0 s",				"0.0000 s" },
+		{ Unit::UNIT_MICROAMPS,		0,				"0 A",				"0.0000 A" },
+		{ Unit::UNIT_UI,			0,				"0 UI",				"0.0000 UI" },
 		{ Unit::UNIT_VOLTS,			-1.5e6,			"-1.5 MV",			"-1.500 MV" },
 		{ Unit::UNIT_AMPS,			1.5e6,			"1.5 MA",			"1.500 MA" },
 		{ Unit::UNIT_OHMS,			1234.5,			"1.2345 k\xce\xa9",	"1.234 k\xce\xa9" },
@@ -123,6 +133,7 @@ TEST_CASE("Unit_Types_PrettyPrint")
 		{ Unit::UNIT_UI,			1.5,			"1.5 UI",			"1.500 UI" },
 		{ Unit::UNIT_UI,			1234.5,			"1.2345k UI",		"1.234k UI" },
 		{ Unit::UNIT_UI,			0.002,			"2m UI",			"2.000m UI" },
+		{ Unit::UNIT_UI,			1e-6,			"1" MU " UI",		"1.0000" MU " UI" },
 		{ Unit::UNIT_COUNTS,		1234.5,			"1234.5",			"1234" },
 		{ Unit::UNIT_COUNTS,		-1.5e6,			"-1500000",			"-1500000" },
 
@@ -378,6 +389,20 @@ TEST_CASE("Unit_Types_RoundTrip")
 	{
 		Unit u(type);
 		for(auto v : values)
+		{
+			string text = u.PrettyPrint(v, -1, false);
+			INFO("type " << u.ToString() << " value " << v << " text \"" << text << "\"");
+			CHECK(fabs(u.ParseString(text, false) - v) <= 1e-6 * fabs(v));
+		}
+	}
+
+	//Very small values too, for units that use all of the SI prefixes
+	const Unit::UnitType siTypes[] = { Unit::UNIT_HZ, Unit::UNIT_VOLTS, Unit::UNIT_FARADS, Unit::UNIT_UI };
+	const double smallValues[] = { 4.7e-9, -1.5e-6, 1e-12, 2.2e-15 };
+	for(auto type : siTypes)
+	{
+		Unit u(type);
+		for(auto v : smallValues)
 		{
 			string text = u.PrettyPrint(v, -1, false);
 			INFO("type " << u.ToString() << " value " << v << " text \"" << text << "\"");
