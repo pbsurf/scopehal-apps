@@ -946,6 +946,69 @@ TEST_CASE("IIOSDR_CalibrationFile")
 		REQUIRE(sdr->GetCalibrationGain(0, 2000000000) == Catch::Approx(-12.0412).margin(0.01));
 	}
 
+	SECTION("JSON")
+	{
+		//Pairs, with numbers and strings with units, out of order and pretty printed
+		TempFile f("cal.json",
+			"[\n"
+			"\t[2.5e9, 2],\n"
+			"\t[\"2 GHz\", \"6 dB\"],\n"
+			"\t[1000000000, 10]\n"
+			"]\n");
+		REQUIRE(sdr->SetCalibrationFile(0, f.m_path));
+		REQUIRE(sdr->GetCalibrationError(0) == "");
+		REQUIRE(sdr->GetCalibrationGain(0, 1500000000) == Catch::Approx(8));
+		REQUIRE(sdr->GetCalibrationGain(0, 2400000000) == Catch::Approx(2.8));
+
+		//Objects, under "points" with other things alongside
+		TempFile f2("cal.json",
+			"{\"device\": \"pluto-1\", \"points\": ["
+			"{\"freq\": 1e9, \"gain\": 1}, {\"frequency\": \"3 GHz\", \"gain\": 5}]}");
+		REQUIRE(sdr->SetCalibrationFile(0, f2.m_path));
+		REQUIRE(sdr->GetCalibrationGain(0, 2000000000) == Catch::Approx(3));
+
+		//Pasted in rather than a file, with the newlines a single line text box turns into spaces
+		string json = " [[1e9, 1],  [3e9, 5]] ";
+		REQUIRE(SCPISDR::IsCalibrationJson(json));
+		REQUIRE(!SCPISDR::IsCalibrationJson(f.m_path));
+		REQUIRE(!SCPISDR::IsCalibrationJson(""));
+		REQUIRE(sdr->SetCalibrationFile(0, json));
+		REQUIRE(sdr->GetCalibrationFile(0) == json);
+		REQUIRE(sdr->GetCalibrationError(0) == "");
+		REQUIRE(sdr->GetCalibrationGain(0, 2000000000) == Catch::Approx(3));
+
+		REQUIRE(sdr->SetCalibrationFile(0, "{\"points\": [{\"freq\": \"915 MHz\", \"gain\": -3}]}"));
+		REQUIRE(sdr->GetCalibrationGain(0, 100000000) == Catch::Approx(-3));
+	}
+
+	SECTION("JSON errors")
+	{
+		//Not JSON at all
+		REQUIRE(!sdr->SetCalibrationFile(0, "[[1e9, 1], [2e9"));
+		REQUIRE(sdr->GetCalibrationError(0).find("Not valid JSON") != string::npos);
+		REQUIRE(sdr->GetCalibrationGain(0, 1000000000) == 0);
+
+		//Valid JSON, wrong shape
+		REQUIRE(!sdr->SetCalibrationFile(0, "{\"freq\": 1e9, \"gain\": 1}"));
+		REQUIRE(sdr->GetCalibrationError(0).find("points") != string::npos);
+
+		REQUIRE(!sdr->SetCalibrationFile(0, "[[1e9, 1], [2e9, \"oops\"]]"));
+		REQUIRE(sdr->GetCalibrationError(0).find("Point 2") != string::npos);
+
+		REQUIRE(!sdr->SetCalibrationFile(0, "[[1e9, 1, 2]]"));
+		REQUIRE(sdr->GetCalibrationError(0).find("Point 1") != string::npos);
+
+		REQUIRE(!sdr->SetCalibrationFile(0, "[{\"freq\": 1e9}]"));
+		REQUIRE(sdr->GetCalibrationError(0).find("Point 1") != string::npos);
+
+		REQUIRE(!sdr->SetCalibrationFile(0, "[]"));
+		REQUIRE(sdr->GetCalibrationError(0) != "");
+
+		TempFile f("bad.json", "{\"points\": 3}");
+		REQUIRE(!sdr->SetCalibrationFile(0, f.m_path));
+		REQUIRE(sdr->GetCalibrationError(0) != "");
+	}
+
 	SECTION("Errors")
 	{
 		//A bad file leaves no calibration, but remembers the path so it can be fixed
@@ -1000,6 +1063,27 @@ TEST_CASE("IIOSDR_LevelCorrectionSessionRoundTrip")
 	//The saved range already goes with the external gain, so it isn't scaled again
 	auto ochan2 = dynamic_cast<OscilloscopeChannel*>(sdr2->GetChannel(1));
 	REQUIRE(ochan2->GetVoltageRange(0) == Catch::Approx(range));
+}
+
+TEST_CASE("IIOSDR_JsonCalibrationSessionRoundTrip")
+{
+	//Pasted JSON is kept in the session, not a file
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9363", ctx);
+	string json = "{\"points\": [[1e9, 1], [\"3 GHz\", 5]]}";
+	REQUIRE(sdr->SetCalibrationFile(0, json));
+
+	IDTable table;
+	auto node = sdr->SerializeConfiguration(table);
+
+	IIOContext* ctx2;
+	auto sdr2 = MakeSDR("mock:ad9363", ctx2);
+	IDTable idmap;
+	sdr2->LoadConfiguration(2, node, idmap);
+
+	REQUIRE(sdr2->GetCalibrationFile(0) == json);
+	REQUIRE(sdr2->GetCalibrationError(0) == "");
+	REQUIRE(sdr2->GetCalibrationGain(0, 2000000000) == Catch::Approx(3));
 }
 
 TEST_CASE("IIOSDR_Limits")

@@ -328,10 +328,13 @@ void ChannelPropertiesDialog::RenderLevelCorrection(SCPISDR* sdr, size_t index, 
 		{
 			vector<FileBrowserFilter> filters =
 			{
-				{ "Calibration files (*.csv, *.txt, *.s2p)", "*.csv;*.txt;*.s2p" },
+				{ "Calibration files (*.csv, *.txt, *.s2p, *.json)", "*.csv;*.txt;*.s2p;*.json" },
 				{ "All files", "*" }
 			};
-			m_fileDialog = MakeFileBrowser(m_parent, m_committedCalFile, "Select Calibration File", filters, false);
+
+			//Don't start the browser in pasted JSON
+			string start = SCPISDR::IsCalibrationJson(m_committedCalFile) ? "" : m_committedCalFile;
+			m_fileDialog = MakeFileBrowser(m_parent, start, "Select Calibration File", filters, false);
 		}
 		else
 			LogTrace("file dialog is already open, ignoring additional button click\n");
@@ -346,7 +349,11 @@ void ChannelPropertiesDialog::RenderLevelCorrection(SCPISDR* sdr, size_t index, 
 		"    # freq, gain\n"
 		"    100 MHz, 3.5\n"
 		"    2.4e9, 1.2\n"
-		"(frequency in Hz, or with a unit), or a Touchstone file with S21 as the gain.");
+		"(frequency in Hz, or with a unit), a Touchstone file with S21 as the gain, or a JSON file.\n\n"
+		"JSON can also be pasted straight into the box instead of a path. It's an array of points, each either "
+		"[frequency, gain] or {\"freq\": frequency, \"gain\": gain}, or an object with that array under "
+		"\"points\", for example\n"
+		"    [[100e6, 3.5], [\"2.4 GHz\", 1.2]]");
 
 	auto err = sdr->GetCalibrationError(index);
 	if(!err.empty())
