@@ -246,10 +246,13 @@ bool FilterGraphEditor::Render()
 	auto dlg = m_propertiesDialogs[m_selectedProperties];
 	auto fdlg = dynamic_pointer_cast<FilterPropertiesDialog>(dlg);
 	auto bdlg = dynamic_pointer_cast<BERTInputChannelDialog>(dlg);
+	auto cdlg = dynamic_pointer_cast<ChannelPropertiesDialog>(dlg);
 	if(fdlg)
 		fdlg->RunFileDialog();
 	else if(bdlg)
 		bdlg->RunFileDialog();
+	else if(cdlg)
+		cdlg->RunFileDialog();
 
 	//Render our error window
 	m_errorWindow.Render();

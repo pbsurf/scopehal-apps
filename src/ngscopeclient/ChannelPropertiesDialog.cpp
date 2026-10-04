@@ -36,6 +36,7 @@
 #include "ngscopeclient.h"
 #include "MainWindow.h"
 #include "ChannelPropertiesDialog.h"
+#include "FileBrowser.h"
 #include "../scopehal/SCPISDR.h"
 #include <imgui_node_editor.h>
 
@@ -115,6 +116,7 @@ ChannelPropertiesDialog::ChannelPropertiesDialog(InstrumentChannel* chan, MainWi
 		m_committedAttenuation = 1;
 		m_navg = 1;
 		m_attenuation = "";
+		m_committedExternalGain = 0;
 	}
 }
 
@@ -142,6 +144,17 @@ void ChannelPropertiesDialog::RefreshInputSettings(Oscilloscope* scope, size_t n
 	//Attenuation
 	m_committedAttenuation = scope->GetChannelAttenuation(nchan);
 	m_attenuation = to_string(m_committedAttenuation);
+
+	//SDR level correction
+	m_committedExternalGain = 0;
+	auto sdr = dynamic_cast<SCPISDR*>(scope);
+	if(sdr && sdr->HasLevelCorrection(nchan))
+	{
+		m_committedExternalGain = sdr->GetExternalGain(nchan);
+		m_externalGain = Unit(Unit::UNIT_DB).PrettyPrint(m_committedExternalGain);
+		m_committedCalFile = sdr->GetCalibrationFile(nchan);
+		m_calFile = m_committedCalFile;
+	}
 
 	//Coupling
 	m_coupling = 0;
@@ -232,6 +245,128 @@ ChannelPropertiesDialog::~ChannelPropertiesDialog()
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Rendering
+
+bool ChannelPropertiesDialog::Render()
+{
+	RunFileDialog();
+	return Dialog::Render();
+}
+
+/**
+	@brief Runs the calibration file browser, if it's open
+ */
+void ChannelPropertiesDialog::RunFileDialog()
+{
+	if(!m_fileDialog)
+		return;
+
+	m_fileDialog->Render();
+
+	if(m_fileDialog->IsClosedOK())
+	{
+		m_committedCalFile = m_fileDialog->GetFileName();
+		m_calFile = m_committedCalFile;
+
+		auto ochan = dynamic_cast<OscilloscopeChannel*>(GetChannel());
+		auto sdr = ochan ? dynamic_cast<SCPISDR*>(ochan->GetScope()) : nullptr;
+		if(sdr)
+			sdr->SetCalibrationFile(ochan->GetIndex(), m_committedCalFile);
+	}
+
+	if(m_fileDialog->IsClosed())
+		m_fileDialog = nullptr;
+}
+
+/**
+	@brief Reloads the vertical range and offset of each stream, after something else changed them
+ */
+void ChannelPropertiesDialog::RefreshVerticalSettings()
+{
+	auto chan = GetChannel();
+	auto ochan = dynamic_cast<OscilloscopeChannel*>(chan);
+	for(size_t i = 0; i<chan->GetStreamCount(); i++)
+	{
+		auto unit = chan->GetYAxisUnits(i);
+
+		m_committedOffset[i] = ochan->GetOffset(i);
+		m_offset[i] = unit.PrettyPrint(m_committedOffset[i]);
+
+		m_committedRange[i] = ochan->GetVoltageRange(i);
+		m_range[i] = unit.PrettyPrint(m_committedRange[i]);
+	}
+}
+
+/**
+	@brief Renders the external gain and calibration file of an SDR channel, and the level correction they add up to
+ */
+void ChannelPropertiesDialog::RenderLevelCorrection(SCPISDR* sdr, size_t index, float width)
+{
+	Unit db(Unit::UNIT_DB);
+
+	ImGui::SetNextItemWidth(width);
+	if(UnitInputWithImplicitApply("External gain", m_externalGain, m_committedExternalGain, db))
+	{
+		sdr->SetExternalGain(index, m_committedExternalGain);
+
+		//The range and offset are scaled to match
+		RefreshVerticalSettings();
+		if(m_state)
+			m_state->m_needsUpdate[index] = true;
+	}
+	HelpMarker(
+		"Gain of whatever is in front of the input, such as an amplifier or a cable. Use a negative value for loss, "
+		"for example -20 dB for a 20 dB attenuator.\n\n"
+		"The signal level is shown as it is at the input of that, rather than at the input of the radio.");
+
+	ImGui::SetNextItemWidth(width);
+	if(TextInputWithImplicitApply("###calfile", m_calFile, m_committedCalFile))
+		sdr->SetCalibrationFile(index, m_committedCalFile);
+	ImGui::SameLine();
+	if(ImGui::Button("...###calbrowser"))
+	{
+		if(!m_fileDialog)
+		{
+			vector<FileBrowserFilter> filters =
+			{
+				{ "Calibration files (*.csv, *.txt, *.s2p)", "*.csv;*.txt;*.s2p" },
+				{ "All files", "*" }
+			};
+			m_fileDialog = MakeFileBrowser(m_parent, m_committedCalFile, "Select Calibration File", filters, false);
+		}
+		else
+			LogTrace("file dialog is already open, ignoring additional button click\n");
+	}
+	ImGui::SameLine();
+	ImGui::TextUnformatted("Calibration file");
+	HelpMarker(
+		"Gain of the radio vs frequency, used to correct the signal level. Leave empty for no calibration.\n\n"
+		"The gain is how many dB higher than it should the level reads with no calibration, no external gain, and "
+		"0 dB receive gain. It's interpolated linearly between points.\n\n"
+		"Either a text file with a frequency and a gain on each line, for example\n"
+		"    # freq, gain\n"
+		"    100 MHz, 3.5\n"
+		"    2.4e9, 1.2\n"
+		"(frequency in Hz, or with a unit), or a Touchstone file with S21 as the gain.");
+
+	auto err = sdr->GetCalibrationError(index);
+	if(!err.empty())
+	{
+		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 0.4, 0.4, 1));
+		ImGui::TextWrapped("%s", err.c_str());
+		ImGui::PopStyleColor();
+	}
+
+	//Show what all of that adds up to at the current LO
+	int64_t freq = sdr->GetCenterFrequency(index);
+	float rxGain = sdr->HasGainControl(index) ? sdr->GetGain(index) : 0;
+	float total = sdr->GetInputGain(index, freq, rxGain);
+	ImGui::TextDisabled("Input gain at %s: %s",
+		Unit(Unit::UNIT_HZ).PrettyPrint(freq).c_str(),
+		db.PrettyPrint(total).c_str());
+	HelpMarker(
+		"Total gain taken out of the signal level at the current center frequency: the receive gain, plus the "
+		"external gain, plus the gain from the calibration file.");
+}
 
 /**
 	@brief Renders the dialog and handles UI events
@@ -485,8 +620,10 @@ bool ChannelPropertiesDialog::DoRender()
 					//Can't set the gain by hand if the radio is running AGC
 					bool adjustable = m_state->m_gainAdjustable[index];
 					auto range = sdr->GetGainRange(index);
-					char help[128];
-					snprintf(help, sizeof(help), "Receive gain, from %.0f to %.0f dB.%s",
+					char help[256];
+					snprintf(help, sizeof(help),
+					"Receive gain, from %.0f to %.0f dB. It's taken out of the signal level, so the level stays the "
+					"same when the gain changes.%s",
 						range.first, range.second,
 						adjustable ? "" : "\n\nThis is disabled because automatic gain control is active.");
 					if(!adjustable)
@@ -534,6 +671,10 @@ bool ChannelPropertiesDialog::DoRender()
 						ImGui::EndDisabled();
 					HelpMarker("Attenuation setting for the probe (for example, 10 for a 10:1 probe)");
 				}
+
+				//SDR level correction
+				if(sdr && sdr->HasLevelCorrection(index))
+					RenderLevelCorrection(sdr, index, width);
 
 				//SDR signal strength, only read on request
 				if(sdr && sdr->HasRSSI(index))

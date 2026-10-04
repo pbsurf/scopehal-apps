@@ -37,17 +37,24 @@
 
 #include "BaseChannelPropertiesDialog.h"
 
+class FileBrowser;
+class SCPISDR;
+
 class ChannelPropertiesDialog : public BaseChannelPropertiesDialog
 {
 public:
 	ChannelPropertiesDialog(InstrumentChannel* chan, MainWindow* parent, bool graphEditorMode = false);
 	virtual ~ChannelPropertiesDialog();
 
+	virtual bool Render() override;
 	virtual bool DoRender();
+	void RunFileDialog();
 
 protected:
 
 	void RefreshInputSettings(Oscilloscope* scope, size_t nchan);
+	void RefreshVerticalSettings();
+	void RenderLevelCorrection(SCPISDR* sdr, size_t index, float width);
 
 	///@brief Current channel stats, live updated
 	std::shared_ptr<OscilloscopeState> m_state;
@@ -69,6 +76,13 @@ protected:
 
 	std::string m_attenuation;
 	float m_committedAttenuation;
+
+	//SDR level correction
+	std::string m_externalGain;
+	float m_committedExternalGain;
+	std::string m_calFile;
+	std::string m_committedCalFile;
+	std::shared_ptr<FileBrowser> m_fileDialog;
 
 	std::vector<std::string> m_couplingNames;
 	std::vector<OscilloscopeChannel::CouplingType> m_couplings;

@@ -47,6 +47,8 @@
 
 #include "Primitives.h"
 #include "../../lib/scopehal/ComplexChannel.h"
+#include <filesystem>
+#include <fstream>
 
 using namespace std;
 
@@ -70,6 +72,14 @@ static shared_ptr<SCPISDR> MakeSDR(const string& uri, IIOContext*& ctx)
 	REQUIRE(sdr != nullptr);
 	return sdr;
 }
+
+/**
+	@brief Full scale of the ADC referred to the input, with the mock's AGC running
+
+	The mock's signals are defined as a fraction of full scale at 20 dB gain, which is where its AGC settles. The driver
+	takes the gain out, so the samples are a tenth of that.
+ */
+static const double g_mockFullScale = 0.1;
 
 /**
 	@brief Gets the magnitude of the component of a complex baseband signal at the given frequency, normalized so that
@@ -290,18 +300,18 @@ TEST_CASE("IIOSDR_Acquire")
 	double wanted = ToneMagnitude(i, q, 500000);
 	double image = ToneMagnitude(i, q, -500000);
 	double elsewhere = ToneMagnitude(i, q, 900000);
-	REQUIRE(wanted > 0.45);
-	REQUIRE(wanted < 0.55);
-	REQUIRE(image < 0.02);
-	REQUIRE(elsewhere < 0.02);
+	REQUIRE(wanted > 0.45 * g_mockFullScale);
+	REQUIRE(wanted < 0.55 * g_mockFullScale);
+	REQUIRE(image < 0.02 * g_mockFullScale);
+	REQUIRE(elsewhere < 0.02 * g_mockFullScale);
 
 	//Every sample is within full scale
 	auto iw = dynamic_cast<UniformAnalogWaveform*>(i);
 	iw->PrepareForCpuAccess();
 	for(size_t n=0; n<iw->size(); n++)
 	{
-		REQUIRE(iw->m_samples[n] >= -1);
-		REQUIRE(iw->m_samples[n] < 1);
+		REQUIRE(iw->m_samples[n] >= -g_mockFullScale);
+		REQUIRE(iw->m_samples[n] < g_mockFullScale);
 	}
 
 	//Retune so the tone is at -500 kHz, it should follow
@@ -312,8 +322,8 @@ TEST_CASE("IIOSDR_Acquire")
 	REQUIRE(sdr->PopPendingWaveform());
 	i = chan->GetData(0);
 	q = chan->GetData(1);
-	REQUIRE(ToneMagnitude(i, q, -500000) > 0.45);
-	REQUIRE(ToneMagnitude(i, q, 500000) < 0.02);
+	REQUIRE(ToneMagnitude(i, q, -500000) > 0.45 * g_mockFullScale);
+	REQUIRE(ToneMagnitude(i, q, 500000) < 0.02 * g_mockFullScale);
 	REQUIRE(fabs(chan->GetScalarValue(2) - 2401000000.0) < 256);
 
 	//Retune far away so there's nothing in band, only noise
@@ -324,8 +334,8 @@ TEST_CASE("IIOSDR_Acquire")
 	REQUIRE(sdr->PopPendingWaveform());
 	i = chan->GetData(0);
 	q = chan->GetData(1);
-	REQUIRE(ToneMagnitude(i, q, 500000) < 0.02);
-	REQUIRE(ToneMagnitude(i, q, -500000) < 0.02);
+	REQUIRE(ToneMagnitude(i, q, 500000) < 0.02 * g_mockFullScale);
+	REQUIRE(ToneMagnitude(i, q, -500000) < 0.02 * g_mockFullScale);
 
 	//Sample rate change is reflected in the waveform timing
 	sdr->SetCenterFrequency(0, 2400000000);
@@ -337,7 +347,7 @@ TEST_CASE("IIOSDR_Acquire")
 	i = chan->GetData(0);
 	q = chan->GetData(1);
 	REQUIRE(i->m_timescale == 200000000);
-	REQUIRE(ToneMagnitude(i, q, 500000) > 0.45);
+	REQUIRE(ToneMagnitude(i, q, 500000) > 0.45 * g_mockFullScale);
 }
 
 TEST_CASE("IIOSDR_Sweep")
@@ -368,10 +378,12 @@ TEST_CASE("IIOSDR_Sweep")
 	REQUIRE(ctx->ReadChannelAttrInt(phy, "voltage0", false, "rf_bandwidth", v));
 	REQUIRE(v == 20000000);
 
-	//Steps are 80% of the bandwidth, rounded down to a whole number of FFT bins, centered on the span
+	//Steps are half the bandwidth, rounded down to a whole number of FFT bins (10 MHz is exactly 2048), centered on
+	//the span
 	const double bin = 20000000.0 / depth;
-	const double step = floor(16000000 / bin) * bin;
-	const size_t nsteps = 4;
+	const double step = floor(10000000 / bin) * bin;
+	const size_t nsteps = 6;
+	REQUIRE(step == 10000000);
 
 	//A single trigger goes all the way across the sweep, then stops
 	sdr->StartSingleTrigger();
@@ -389,15 +401,15 @@ TEST_CASE("IIOSDR_Sweep")
 	}
 	REQUIRE(!sdr->IsTriggerArmed());
 
-	//The tone at 2.4125 GHz shows up in the second step
-	double lo2 = 2420000000 - step / 2;
+	//The tone at 2.412 GHz shows up in the second step
+	double lo2 = 2420000000 - ((nsteps - 1) / 2.0 - 1) * step;
 	sdr->StartSingleTrigger();
 	REQUIRE(sdr->AcquireData());
 	REQUIRE(sdr->PopPendingWaveform());
 	REQUIRE(sdr->AcquireData());
 	REQUIRE(sdr->PopPendingWaveform());
 	REQUIRE(fabs(chan->GetScalarValue(2) - lo2) < 256);
-	REQUIRE(ToneMagnitude(chan->GetData(0), chan->GetData(1), 2412000000 - lo2) > 0.35);
+	REQUIRE(ToneMagnitude(chan->GetData(0), chan->GetData(1), 2412000000 - lo2) > 0.35 * g_mockFullScale);
 
 	//Changing some other setting mid sweep doesn't disturb it, and the LO isn't mistaken for the center frequency
 	sdr->SetGainMode(0, "manual");
@@ -413,7 +425,7 @@ TEST_CASE("IIOSDR_Sweep")
 	sdr->BackgroundProcessing();
 	REQUIRE(sdr->AcquireData());
 	REQUIRE(sdr->PopPendingWaveform());
-	REQUIRE(fabs(chan->GetScalarValue(2) - (2430000000 - 1.5 * step)) < 256);
+	REQUIRE(fabs(chan->GetScalarValue(2) - (2430000000 - (nsteps - 1) / 2.0 * step)) < 256);
 	sdr->Stop();
 
 	//Narrow enough to capture at once: no more sweeping, and the LO goes back to the center
@@ -489,7 +501,7 @@ TEST_CASE("IIOSDR_SweepStep")
 	auto chan = sdr->GetChannel(0);
 
 	//The LO step can be changed (ngscopeclient sets it from a preference), and is limited to 10 - 100%
-	REQUIRE(iio->GetSweepStepFraction() == 0.8);
+	REQUIRE(iio->GetSweepStepFraction() == 0.5);
 	iio->SetSweepStepFraction(0.01);
 	REQUIRE(iio->GetSweepStepFraction() == 0.1);
 	iio->SetSweepStepFraction(2);
@@ -549,9 +561,9 @@ TEST_CASE("IIOSDR_SweepQueued")
 	sdr->SetSpan(60000000);
 	sdr->BackgroundProcessing();
 
-	const double bin = 20000000.0 / depth;
-	const double step = floor(16000000 / bin) * bin;
-	const size_t nsteps = 4;
+	//Default steps are half the bandwidth, 10 MHz
+	const double step = 10000000;
+	const size_t nsteps = 6;
 
 	sdr->StartSingleTrigger();
 	for(size_t i=0; i<nsteps; i++)
@@ -573,7 +585,7 @@ TEST_CASE("IIOSDR_SweepQueued")
 	sdr->ClearPendingWaveforms();
 	REQUIRE(sdr->AcquireData());
 	REQUIRE(sdr->PopPendingWaveform());
-	REQUIRE(fabs(chan->GetScalarValue(2) - (2420000000 + 0.5 * step)) < 1);
+	REQUIRE(fabs(chan->GetScalarValue(2) - (2420000000 + (2 - (nsteps - 1) / 2.0) * step)) < 1);
 	REQUIRE(!sdr->PopPendingWaveform());
 	sdr->Stop();
 }
@@ -617,9 +629,9 @@ TEST_CASE("IIOSDR_TwoChannels")
 	//Both see the tone, RX2 a bit weaker
 	double rx1 = ToneMagnitude(sdr->GetChannel(0)->GetData(0), sdr->GetChannel(0)->GetData(1), 500000);
 	double rx2 = ToneMagnitude(sdr->GetChannel(1)->GetData(0), sdr->GetChannel(1)->GetData(1), 500000);
-	REQUIRE(rx1 > 0.45);
-	REQUIRE(rx2 > 0.25);
-	REQUIRE(rx2 < 0.4);
+	REQUIRE(rx1 > 0.45 * g_mockFullScale);
+	REQUIRE(rx2 > 0.25 * g_mockFullScale);
+	REQUIRE(rx2 < 0.4 * g_mockFullScale);
 
 	//Only RX2 enabled
 	sdr->DisableChannel(0);
@@ -627,8 +639,8 @@ TEST_CASE("IIOSDR_TwoChannels")
 	REQUIRE(sdr->AcquireData());
 	REQUIRE(sdr->PopPendingWaveform());
 	rx2 = ToneMagnitude(sdr->GetChannel(1)->GetData(0), sdr->GetChannel(1)->GetData(1), 500000);
-	REQUIRE(rx2 > 0.25);
-	REQUIRE(rx2 < 0.4);
+	REQUIRE(rx2 > 0.25 * g_mockFullScale);
+	REQUIRE(rx2 < 0.4 * g_mockFullScale);
 }
 
 TEST_CASE("IIOSDR_RSSI")
@@ -697,7 +709,7 @@ TEST_CASE("IIOSDR_Gain")
 	auto range = sdr->GetGainRange(0);
 	REQUIRE(range.first == -1);
 	REQUIRE(range.second == 73);
-	REQUIRE(sdr->GetGain(0) == 71);
+	REQUIRE(sdr->GetGain(0) == 20);
 
 	//You can ask for a gain in AGC mode, but it doesn't reach the hardware until the mode changes
 	sdr->SetGain(0, 30);
@@ -706,7 +718,7 @@ TEST_CASE("IIOSDR_Gain")
 	double hw;
 	string hwmode;
 	REQUIRE(ctx->ReadChannelAttrDouble(phy, "voltage0", false, "hardwaregain", hw));
-	REQUIRE(hw == 71);
+	REQUIRE(hw == 20);
 	REQUIRE(sdr->GetGain(0) == 30);
 
 	sdr->SetGainMode(0, "manual");
@@ -759,14 +771,15 @@ TEST_CASE("IIOSDR_Gain")
 	REQUIRE(hw == 10);
 }
 
-TEST_CASE("IIOSDR_GainAffectsSignal")
+TEST_CASE("IIOSDR_GainCompensated")
 {
 	IIOContext* ctx;
 	auto sdr = MakeSDR("mock:ad9363", ctx);
 	auto chan = sdr->GetChannel(0);
 	sdr->SetSampleDepth(4096);
 
-	//In manual mode the mock's signal level follows the gain (20 dB is the reference, +/- 6 dB is 2x)
+	//In manual mode the mock's signal level follows the gain (20 dB is the reference, +/- 6 dB is 2x).
+	//The driver takes the gain out, so the level at the input stays the same.
 	sdr->SetGainMode(0, "manual");
 	sdr->SetGain(0, 20);
 	sdr->BackgroundProcessing();
@@ -774,8 +787,8 @@ TEST_CASE("IIOSDR_GainAffectsSignal")
 	REQUIRE(sdr->AcquireData());
 	REQUIRE(sdr->PopPendingWaveform());
 	double at20 = ToneMagnitude(chan->GetData(0), chan->GetData(1), 500000);
-	REQUIRE(at20 > 0.45);
-	REQUIRE(at20 < 0.55);
+	REQUIRE(at20 > 0.045);
+	REQUIRE(at20 < 0.055);
 
 	sdr->SetGain(0, 14);
 	sdr->BackgroundProcessing();
@@ -783,8 +796,210 @@ TEST_CASE("IIOSDR_GainAffectsSignal")
 	REQUIRE(sdr->AcquireData());
 	REQUIRE(sdr->PopPendingWaveform());
 	double at14 = ToneMagnitude(chan->GetData(0), chan->GetData(1), 500000);
-	REQUIRE(at14 > 0.22);
-	REQUIRE(at14 < 0.28);
+	REQUIRE(at14 == Catch::Approx(at20).epsilon(0.05));
+
+	//With AGC running the gain is read back on every acquisition, and taken out too
+	sdr->SetGainMode(0, "fast_attack");
+	sdr->BackgroundProcessing();
+	REQUIRE(sdr->GetGain(0) == 20);
+
+	//Pretend the AGC moved the gain to 26 dB behind our back (the mock's AGC doesn't, so do it by hand)
+	REQUIRE(ctx->WriteChannelAttr(phy, "voltage0", false, "gain_control_mode", "manual"));
+	REQUIRE(ctx->WriteChannelAttrDouble(phy, "voltage0", false, "hardwaregain", 26));
+	sdr->StartSingleTrigger();
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	REQUIRE(sdr->GetGain(0) == 26);
+	double agc = ToneMagnitude(chan->GetData(0), chan->GetData(1), 500000);
+	REQUIRE(agc == Catch::Approx(at20).epsilon(0.05));
+}
+
+/**
+	@brief Writes a file in the temporary directory, and deletes it when it goes out of scope
+ */
+class TempFile
+{
+public:
+	TempFile(const string& name, const string& contents)
+	: m_path((filesystem::temp_directory_path() / ("ngscopeclient-test-" + name)).string())
+	{
+		ofstream out(m_path);
+		out << contents;
+	}
+
+	~TempFile()
+	{
+		error_code ec;
+		filesystem::remove(m_path, ec);
+	}
+
+	string m_path;
+};
+
+TEST_CASE("IIOSDR_ExternalGain")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9363", ctx);
+	auto chan = sdr->GetChannel(0);
+	auto ochan = dynamic_cast<OscilloscopeChannel*>(chan);
+	sdr->SetSampleDepth(4096);
+
+	REQUIRE(sdr->HasLevelCorrection(0));
+	REQUIRE(!sdr->HasLevelCorrection(1));
+	REQUIRE(sdr->GetExternalGain(0) == 0);
+
+	//Default range is the full scale of the ADC, referred to the input
+	REQUIRE(ochan->GetVoltageRange(0) == Catch::Approx(2 * g_mockFullScale));
+	REQUIRE(ochan->GetVoltageRange(1) == Catch::Approx(2 * g_mockFullScale));
+
+	sdr->StartSingleTrigger();
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	double before = ToneMagnitude(chan->GetData(0), chan->GetData(1), 500000);
+
+	//A 20 dB pad in front of the input: the signal there is 10x bigger, and so is the range so it looks the same
+	ochan->SetOffset(0.01, 0);
+	sdr->SetExternalGain(0, -20);
+	REQUIRE(sdr->GetExternalGain(0) == -20);
+	REQUIRE(ochan->GetVoltageRange(0) == Catch::Approx(20 * g_mockFullScale));
+	REQUIRE(ochan->GetVoltageRange(1) == Catch::Approx(20 * g_mockFullScale));
+	REQUIRE(ochan->GetOffset(0) == Catch::Approx(0.1));
+
+	//20 dB of receive gain and a 20 dB pad cancel out
+	REQUIRE(sdr->GetInputGain(0, 2400000000, 20) == Catch::Approx(0));
+
+	sdr->StartSingleTrigger();
+	REQUIRE(sdr->AcquireData());
+	REQUIRE(sdr->PopPendingWaveform());
+	double after = ToneMagnitude(chan->GetData(0), chan->GetData(1), 500000);
+	REQUIRE(after == Catch::Approx(before * 10).epsilon(0.05));
+}
+
+TEST_CASE("IIOSDR_CalibrationFile")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9363", ctx);
+	auto chan = sdr->GetChannel(0);
+	sdr->SetSampleDepth(4096);
+
+	REQUIRE(sdr->GetCalibrationFile(0) == "");
+	REQUIRE(sdr->GetCalibrationError(0) == "");
+	REQUIRE(sdr->GetCalibrationGain(0, 2400000000) == 0);
+
+	SECTION("Text")
+	{
+		//Header, comments, units, and points out of order
+		TempFile f("cal.csv",
+			"freq_hz,gain_db\n"
+			"# A comment\n"
+			"\n"
+			"2.5e9, 2\n"
+			"2 GHz, 6 dB   # another\n"
+			"1000000000;10\n");
+		REQUIRE(sdr->SetCalibrationFile(0, f.m_path));
+		REQUIRE(sdr->GetCalibrationFile(0) == f.m_path);
+		REQUIRE(sdr->GetCalibrationError(0) == "");
+
+		//Interpolated between points, flat outside them
+		REQUIRE(sdr->GetCalibrationGain(0, 2000000000) == Catch::Approx(6));
+		REQUIRE(sdr->GetCalibrationGain(0, 1500000000) == Catch::Approx(8));
+		REQUIRE(sdr->GetCalibrationGain(0, 2400000000) == Catch::Approx(2.8));
+		REQUIRE(sdr->GetCalibrationGain(0, 100000000) == Catch::Approx(10));
+		REQUIRE(sdr->GetCalibrationGain(0, 6000000000) == Catch::Approx(2));
+		REQUIRE(sdr->GetInputGain(0, 2400000000, 20) == Catch::Approx(22.8));
+
+		//And it's taken out of the signal (the mock's tone is at 2.4005 GHz, the LO is 2.4 GHz)
+		sdr->StartSingleTrigger();
+		REQUIRE(sdr->AcquireData());
+		REQUIRE(sdr->PopPendingWaveform());
+		double mag = ToneMagnitude(chan->GetData(0), chan->GetData(1), 500000);
+		REQUIRE(mag == Catch::Approx(0.5 * g_mockFullScale * pow(10, -2.8 / 20)).epsilon(0.05));
+
+		//Whitespace separated
+		TempFile f2("cal.txt", "1e9 1\n2e9 3\n");
+		REQUIRE(sdr->SetCalibrationFile(0, f2.m_path));
+		REQUIRE(sdr->GetCalibrationGain(0, 1500000000) == Catch::Approx(2));
+
+		//Back to none
+		REQUIRE(sdr->SetCalibrationFile(0, ""));
+		REQUIRE(sdr->GetCalibrationGain(0, 1500000000) == 0);
+	}
+
+	SECTION("Single point")
+	{
+		TempFile f("cal.csv", "915e6, -3\n");
+		REQUIRE(sdr->SetCalibrationFile(0, f.m_path));
+		REQUIRE(sdr->GetCalibrationGain(0, 100000000) == Catch::Approx(-3));
+		REQUIRE(sdr->GetCalibrationGain(0, 6000000000) == Catch::Approx(-3));
+	}
+
+	SECTION("Touchstone")
+	{
+		//S21 of 0.5 (-6 dB) and 0.25 (-12 dB)
+		TempFile f("cal.s2p",
+			"# GHz S MA R 50\n"
+			"1 0 0 0.5 0 0 0 0 0\n"
+			"2 0 0 0.25 0 0 0 0 0\n");
+		REQUIRE(sdr->SetCalibrationFile(0, f.m_path));
+		REQUIRE(sdr->GetCalibrationError(0) == "");
+		REQUIRE(sdr->GetCalibrationGain(0, 1000000000) == Catch::Approx(-6.0206).margin(0.01));
+		REQUIRE(sdr->GetCalibrationGain(0, 2000000000) == Catch::Approx(-12.0412).margin(0.01));
+	}
+
+	SECTION("Errors")
+	{
+		//A bad file leaves no calibration, but remembers the path so it can be fixed
+		TempFile f("bad.csv", "1e9, 1\n2e9, oops\n");
+		REQUIRE(!sdr->SetCalibrationFile(0, f.m_path));
+		REQUIRE(sdr->GetCalibrationFile(0) == f.m_path);
+		REQUIRE(sdr->GetCalibrationError(0).find("Line 2") != string::npos);
+		REQUIRE(sdr->GetCalibrationGain(0, 1000000000) == 0);
+
+		TempFile empty("empty.csv", "# nothing\n");
+		REQUIRE(!sdr->SetCalibrationFile(0, empty.m_path));
+		REQUIRE(sdr->GetCalibrationError(0) != "");
+
+		REQUIRE(!sdr->SetCalibrationFile(0, "/nonexistent/cal.csv"));
+		REQUIRE(sdr->GetCalibrationError(0) != "");
+
+		TempFile s1p("cal.s1p", "# GHz S MA R 50\n1 0.5 0\n");
+		REQUIRE(!sdr->SetCalibrationFile(0, s1p.m_path));
+		REQUIRE(sdr->GetCalibrationError(0) != "");
+
+		//Fixing it clears the error
+		TempFile good("good.csv", "1e9, 1\n");
+		REQUIRE(sdr->SetCalibrationFile(0, good.m_path));
+		REQUIRE(sdr->GetCalibrationError(0) == "");
+	}
+}
+
+TEST_CASE("IIOSDR_LevelCorrectionSessionRoundTrip")
+{
+	IIOContext* ctx;
+	auto sdr = MakeSDR("mock:ad9361", ctx);
+	TempFile f("cal.csv", "1e9, 1\n3e9, 5\n");
+	sdr->SetExternalGain(1, -10);
+	REQUIRE(sdr->SetCalibrationFile(1, f.m_path));
+	auto ochan = dynamic_cast<OscilloscopeChannel*>(sdr->GetChannel(1));
+	float range = ochan->GetVoltageRange(0);
+
+	IDTable table;
+	auto node = sdr->SerializeConfiguration(table);
+
+	IIOContext* ctx2;
+	auto sdr2 = MakeSDR("mock:ad9361", ctx2);
+	IDTable idmap;
+	sdr2->LoadConfiguration(2, node, idmap);
+
+	REQUIRE(sdr2->GetExternalGain(0) == 0);
+	REQUIRE(sdr2->GetExternalGain(1) == -10);
+	REQUIRE(sdr2->GetCalibrationFile(0) == "");
+	REQUIRE(sdr2->GetCalibrationFile(1) == f.m_path);
+	REQUIRE(sdr2->GetCalibrationGain(1, 2000000000) == Catch::Approx(3));
+
+	//The saved range already goes with the external gain, so it isn't scaled again
+	auto ochan2 = dynamic_cast<OscilloscopeChannel*>(sdr2->GetChannel(1));
+	REQUIRE(ochan2->GetVoltageRange(0) == Catch::Approx(range));
 }
 
 TEST_CASE("IIOSDR_Limits")

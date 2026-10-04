@@ -288,6 +288,7 @@ TEST_CASE("Filter_SpectrumStitch_IIOSDR")
 	sdr->SetSpan(span);
 	sdr->BackgroundProcessing();
 
+	//Default steps are half the 20 MHz capture bandwidth, so 60 MHz takes six
 	auto sweep = [&]()
 	{
 		size_t captures = 0;
@@ -298,9 +299,9 @@ TEST_CASE("Filter_SpectrumStitch_IIOSDR")
 			REQUIRE(sdr->PopPendingWaveform());
 			exec.RunBlocking(nodes);
 			captures ++;
-			REQUIRE(captures <= 4);
+			REQUIRE(captures <= 6);
 		}
-		REQUIRE(captures == 4);
+		REQUIRE(captures == 6);
 
 		auto out = dynamic_cast<UniformAnalogWaveform*>(stitch->GetData(0));
 		REQUIRE(out != nullptr);
@@ -321,9 +322,10 @@ TEST_CASE("Filter_SpectrumStitch_IIOSDR")
 		return best;
 	};
 
-	//Same scaling as the Complex FFT: (2A)^2 / 50 ohms, in dBm, give or take some scalloping loss
+	//Same scaling as the Complex FFT: (2A)^2 / 50 ohms, in dBm, give or take some scalloping loss.
+	//The driver takes out the 20 dB gain the mock's AGC runs at.
 	auto expectedDbm = [](double amplitude)
-	{ return 10 * log10(4 * amplitude * amplitude / 50) + 30; };
+	{ return 10 * log10(4 * amplitude * amplitude / 50) + 30 - 20; };
 
 	//Run the sweep twice, the second time the ends are trimmed
 	sweep();

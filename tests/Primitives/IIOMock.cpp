@@ -222,6 +222,11 @@ TEST_CASE("IIO_MockGain")
 	//Out of range
 	REQUIRE(!ctx->WriteChannelAttrDouble(phy, "voltage0", false, "hardwaregain", 100));
 
+	//AGC takes over the gain, and settles at the 20 dB the simulated signals are defined at
+	REQUIRE(ctx->WriteChannelAttr(phy, "voltage0", false, "gain_control_mode", "fast_attack"));
+	REQUIRE(ctx->ReadChannelAttrDouble(phy, "voltage0", false, "hardwaregain", gain));
+	REQUIRE(gain == 20);
+
 	//RSSI is read only
 	double rssi;
 	REQUIRE(ctx->ReadChannelAttrDouble(phy, "voltage0", false, "rssi", rssi));

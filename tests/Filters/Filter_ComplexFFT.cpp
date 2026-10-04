@@ -311,8 +311,9 @@ TEST_CASE("Filter_ComplexFFT_IIOSDR")
 	double binHz = g_sampleRate / depth;
 	REQUIRE(fabs(peakHz - 2400500000.0) < 2 * binHz);
 
-	//Same power scaling as the spectrogram: (2A)^2 / 50 ohms, in dBm, give or take some scalloping loss
-	const double expectedDbm = 10 * log10(4 * 0.5 * 0.5 / 50) + 30;
+	//Same power scaling as the spectrogram: (2A)^2 / 50 ohms, in dBm, give or take some scalloping loss.
+	//The driver takes out the 20 dB gain the mock's AGC runs at.
+	const double expectedDbm = 10 * log10(4 * 0.5 * 0.5 / 50) + 30 - 20;
 	REQUIRE(out->m_samples[peak] < expectedDbm + 0.3);
 	REQUIRE(out->m_samples[peak] > expectedDbm - 1.5);
 
