@@ -249,6 +249,36 @@ static string g_steppedItemText;
 static string g_steppedItemBox;
 
 /**
+	@brief What a step asked for, when the value was limited to something else
+
+	If stepping down from "1 MHz" asks for "0 MHz" and the instrument limits that to 200 kHz, the box shows "0.2 MHz".
+	Stepping up from that would give 1.2 MHz, but stepping back up should undo the step, so stepping back towards the
+	value asked for steps from that instead, giving 1 MHz.
+ */
+struct NumericStepLimit
+{
+	///@brief ID of the box this is for
+	ImGuiID id = 0;
+
+	///@brief True if the box is showing a limited value
+	bool valid = false;
+
+	///@brief True if the last step was from the limited value, away from the value asked for
+	bool steppedFurther = false;
+
+	///@brief Text that was in the box when the value was limited, and its cursor position
+	string requestedText;
+	int requestedCursor = 0;
+
+	///@brief Text the box was given instead, and its cursor position
+	string shownText;
+	int shownCursor = 0;
+};
+
+///@brief Limited value of the box in g_steppedItemId, if any
+static NumericStepLimit g_stepLimit;
+
+/**
 	@brief Finds the end of the number in a string (optional leading space and sign, digits, at most one decimal mark)
 
 	@return		Index of the first character after the number
@@ -358,13 +388,58 @@ struct NumericStepData
 
 	///@brief Unit of the box
 	Unit* unit;
+
+	///@brief If not null, what a step that was limited asked for, which is updated when replaceText is put in the box
+	NumericStepLimit* limit;
 };
+
+/**
+	@brief Puts the replacement text in a box being edited, from NumericStepCallback()
+
+	@param data		ImGui callback data
+	@param step		State of the box, with replaceText not null
+ */
+static void ReplaceNumericText(ImGuiInputTextCallbackData* data, NumericStepData* step)
+{
+	//Keep the prefix and the place of the digit at the cursor, so the next step is the same size.
+	//If that can't be done, keep the cursor where it was, as long as it's still in the number.
+	string boxText(data->Buf, data->BufTextLen);
+	string newText;
+	int cursor;
+	if(step->unit->ReformatLikeText(step->replaceValue, boxText, data->CursorPos, newText, cursor))
+		*step->replaceText = newText;
+	else
+		cursor = min(data->CursorPos, NumberEnd(*step->replaceText));
+
+	//Remember what the step asked for, so stepping back can undo it. If the user stepped further past the
+	//limit and got the same value, they still asked for the first value that was limited.
+	if(step->limit)
+	{
+		auto& limit = *step->limit;
+		bool same = limit.valid && limit.steppedFurther && (*step->replaceText == limit.shownText);
+		if(!same)
+		{
+			limit.requestedText = boxText;
+			limit.requestedCursor = data->CursorPos;
+			limit.shownText = *step->replaceText;
+		}
+		limit.shownCursor = cursor;
+		limit.valid = true;
+		limit.steppedFurther = false;
+	}
+
+	data->DeleteChars(0, data->BufTextLen);
+	data->InsertChars(0, step->replaceText->c_str());
+	data->CursorPos = cursor;
+	data->SelectionStart = cursor;
+	data->SelectionEnd = cursor;
+}
 
 /**
 	@brief InputText callback that steps the digit to the left of the cursor when Up/Down is pressed
 
-	It also replaces the text of the box if asked to, which is done every frame since that's the only time ImGui lets us
-	change the text of a box that is being edited.
+	It also replaces the text of the box if asked to, which is done in the callback since that's the only time ImGui
+	lets us change the text of a box that is being edited.
 
 	@param data		ImGui callback data. UserData points to a NumericStepData.
  */
@@ -374,36 +449,72 @@ static int NumericStepCallback(ImGuiInputTextCallbackData* data)
 
 	if(data->EventFlag == ImGuiInputTextFlags_CallbackAlways)
 	{
-		//If the user stepped again this frame, that wins. The new text will be replaced next frame if it needs to be.
-		if(step->replaceText && !step->stepped)
-		{
-			//Keep the prefix and the place of the digit at the cursor, so the next step is the same size.
-			//If that can't be done, keep the cursor where it was, as long as it's still in the number.
-			string boxText(data->Buf, data->BufTextLen);
-			string newText;
-			int cursor;
-			if(step->unit->ReformatLikeText(step->replaceValue, boxText, data->CursorPos, newText, cursor))
-				*step->replaceText = newText;
-			else
-				cursor = min(data->CursorPos, NumberEnd(*step->replaceText));
-
-			data->DeleteChars(0, data->BufTextLen);
-			data->InsertChars(0, step->replaceText->c_str());
-			data->CursorPos = cursor;
-			data->SelectionStart = cursor;
-			data->SelectionEnd = cursor;
-		}
+		if(step->replaceText)
+			ReplaceNumericText(data, step);
 		return 0;
 	}
 
 	if(data->EventFlag != ImGuiInputTextFlags_CallbackHistory)
 		return 0;
 
+	//Put the replacement text in first, so we step from the value we actually have. ImGui only makes one callback per
+	//frame, so if the frame rate is slow enough for a held key to repeat every frame, this is our only chance to.
+	if(step->replaceText)
+		ReplaceNumericText(data, step);
+
 	string text(data->Buf, data->BufTextLen);
 	string newText;
 	int newCursor;
 	bool up = (data->EventKey == ImGuiKey_UpArrow);
-	if(Unit::StepNumericText(text, data->CursorPos, up, newText, newCursor))
+
+	//If the box shows a limited value and the user hasn't touched it since, stepping back towards the value that was
+	//asked for steps from that instead. Holding the key down can ask for a value several steps past the limit before
+	//the limited value gets back to us, so take as many steps as it takes to get past the limited value.
+	bool ok = false;
+	bool further = false;
+	if(step->limit && step->limit->valid && (text == step->limit->shownText) &&
+		(data->CursorPos == step->limit->shownCursor) )
+	{
+		auto& limit = *step->limit;
+		double requested = step->unit->ParseString(limit.requestedText);
+		double shown = step->unit->ParseString(limit.shownText);
+		if(up ? (requested < shown) : (requested > shown))
+		{
+			string once;
+			int onceCursor;
+			if(Unit::StepNumericText(limit.requestedText, limit.requestedCursor, up, once, onceCursor))
+			{
+				double digit = fabs(step->unit->ParseString(once) - requested);
+				if(digit > 0)
+				{
+					double n = floor(fabs(shown - requested) / digit + 1e-9) + 1;
+					if(n == 1)
+					{
+						newText = once;
+						newCursor = onceCursor;
+						ok = true;
+					}
+					else
+					{
+						double value = requested + (up ? n : -n) * digit;
+						ok = step->unit->ReformatLikeText(
+							value, limit.requestedText, limit.requestedCursor, newText, newCursor);
+					}
+				}
+			}
+		}
+		else
+			further = true;
+	}
+	if(step->limit)
+	{
+		step->limit->valid = further;
+		step->limit->steppedFurther = further;
+	}
+
+	if(!ok)
+		ok = Unit::StepNumericText(text, data->CursorPos, up, newText, newCursor);
+	if(ok)
 	{
 		data->DeleteChars(0, data->BufTextLen);
 		data->InsertChars(0, newText.c_str());
@@ -430,9 +541,11 @@ static int NumericStepCallback(ImGuiInputTextCallbackData* data)
 	@param flags	ImGui flags for the input box
 	@param unit		Unit of the value
 	@param stepped	Set to true if the text was changed by an Up/Down step in this frame
-	@param replace	If not null, text to replace the contents of the box with (unless it was stepped in this frame).
+	@param replace	If not null, text to replace the contents of the box with, before any step in this frame.
 					It is set to the text actually put in the box, which has the prefix the box had.
 	@param replaceValue	Value of the replace text
+	@param limit	If not null, what a step that was limited asked for. It is set when replace is put in the box, and
+					used to step back from what was asked for rather than from the limited value.
 
 	@return			Same as ImGui::InputText()
  */
@@ -443,7 +556,8 @@ static bool NumericInputText(
 	Unit& unit,
 	bool& stepped,
 	string* replace = nullptr,
-	double replaceValue = 0)
+	double replaceValue = 0,
+	NumericStepLimit* limit = nullptr)
 {
 	stepped = false;
 
@@ -451,7 +565,7 @@ static bool NumericInputText(
 	//Hex numbers aren't stepped as decimal digits
 	if(unit.GetType() != Unit::UNIT_HEXNUM)
 	{
-		NumericStepData step = { false, replace, replaceValue, &unit };
+		NumericStepData step = { false, replace, replaceValue, &unit, limit };
 		bool ret = ImGui::InputText(
 			label.c_str(),
 			text,
@@ -465,6 +579,7 @@ static bool NumericInputText(
 	(void)unit;
 	(void)replace;
 	(void)replaceValue;
+	(void)limit;
 #endif
 
 	return ImGui::InputText(label.c_str(), text, flags);
@@ -911,12 +1026,31 @@ bool Dialog::renderEditableProperty(
 			if(replace)
 				replaceText = currentValue;
 
+			//Only the box we're stepping can be showing a limited value
+			NumericStepLimit* limit = nullptr;
+			if(g_steppedItemId == editId)
+			{
+				if(g_stepLimit.id != editId)
+				{
+					g_stepLimit = NumericStepLimit();
+					g_stepLimit.id = editId;
+				}
+				limit = &g_stepLimit;
+			}
+			else if(g_stepLimit.id == editId)
+				g_stepLimit = NumericStepLimit();
+
 			enterPressed = NumericInputText(
 				editLabel, &currentValue, ImGuiInputTextFlags_EnterReturnsTrue, unit, stepped,
-				replace ? &replaceText : nullptr, static_cast<double>(committedValue));
+				replace ? &replaceText : nullptr, static_cast<double>(committedValue), limit);
 
 			//What's in the box now, if that changed this frame
-			if(replace)
+			if(stepped)
+			{
+				boxText = currentValue;
+				boxChanged = true;
+			}
+			else if(replace)
 			{
 				boxText = replaceText;
 				boxChanged = true;
