@@ -350,8 +350,14 @@ struct NumericStepData
 	///@brief Set to true if the text was changed by a step
 	bool stepped;
 
-	///@brief If not null, text to replace the contents of the box with
-	const string* replaceText;
+	///@brief If not null, text to replace the contents of the box with. Set to the text actually put in the box.
+	string* replaceText;
+
+	///@brief Value of replaceText, used to show it with the prefix and cursor place the box has
+	double replaceValue;
+
+	///@brief Unit of the box
+	Unit* unit;
 };
 
 /**
@@ -371,8 +377,15 @@ static int NumericStepCallback(ImGuiInputTextCallbackData* data)
 		//If the user stepped again this frame, that wins. The new text will be replaced next frame if it needs to be.
 		if(step->replaceText && !step->stepped)
 		{
-			//Keep the cursor where it was, as long as it's still in the number
-			int cursor = min(data->CursorPos, NumberEnd(*step->replaceText));
+			//Keep the prefix and the place of the digit at the cursor, so the next step is the same size.
+			//If that can't be done, keep the cursor where it was, as long as it's still in the number.
+			string boxText(data->Buf, data->BufTextLen);
+			string newText;
+			int cursor;
+			if(step->unit->ReformatLikeText(step->replaceValue, boxText, data->CursorPos, newText, cursor))
+				*step->replaceText = newText;
+			else
+				cursor = min(data->CursorPos, NumberEnd(*step->replaceText));
 
 			data->DeleteChars(0, data->BufTextLen);
 			data->InsertChars(0, step->replaceText->c_str());
@@ -417,7 +430,9 @@ static int NumericStepCallback(ImGuiInputTextCallbackData* data)
 	@param flags	ImGui flags for the input box
 	@param unit		Unit of the value
 	@param stepped	Set to true if the text was changed by an Up/Down step in this frame
-	@param replace	If not null, text to replace the contents of the box with (unless it was stepped in this frame)
+	@param replace	If not null, text to replace the contents of the box with (unless it was stepped in this frame).
+					It is set to the text actually put in the box, which has the prefix the box had.
+	@param replaceValue	Value of the replace text
 
 	@return			Same as ImGui::InputText()
  */
@@ -427,7 +442,8 @@ static bool NumericInputText(
 	ImGuiInputTextFlags flags,
 	Unit& unit,
 	bool& stepped,
-	const string* replace = nullptr)
+	string* replace = nullptr,
+	double replaceValue = 0)
 {
 	stepped = false;
 
@@ -435,7 +451,7 @@ static bool NumericInputText(
 	//Hex numbers aren't stepped as decimal digits
 	if(unit.GetType() != Unit::UNIT_HEXNUM)
 	{
-		NumericStepData step = { false, replace };
+		NumericStepData step = { false, replace, replaceValue, &unit };
 		bool ret = ImGui::InputText(
 			label.c_str(),
 			text,
@@ -448,6 +464,7 @@ static bool NumericInputText(
 #else
 	(void)unit;
 	(void)replace;
+	(void)replaceValue;
 #endif
 
 	return ImGui::InputText(label.c_str(), text, flags);
@@ -896,7 +913,7 @@ bool Dialog::renderEditableProperty(
 
 			enterPressed = NumericInputText(
 				editLabel, &currentValue, ImGuiInputTextFlags_EnterReturnsTrue, unit, stepped,
-				replace ? &replaceText : nullptr);
+				replace ? &replaceText : nullptr, static_cast<double>(committedValue));
 
 			//What's in the box now, if that changed this frame
 			if(replace)

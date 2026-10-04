@@ -296,3 +296,58 @@ TEST_CASE("Unit_ParseString_UnitIsNotPrefix")
 	Unit hz(Unit::UNIT_HZ);
 	REQUIRE(fabs(hz.ParseString("2 MHz") - 2e6) < 1e-6);
 }
+
+/**
+	@brief Formats value like the text with the cursor at the position of the '|' in the input, and checks the result
+	which also has the new cursor position marked with '|'
+ */
+static void CheckReformat(Unit unit, const string& in, double value, const string& expected)
+{
+	auto cursor = in.find('|');
+	REQUIRE(cursor != string::npos);
+	string text = in;
+	text.erase(cursor, 1);
+
+	string out;
+	int outCursor;
+	INFO("input " << in << " value " << value);
+	REQUIRE(unit.ReformatLikeText(value, text, cursor, out, outCursor));
+	out.insert(outCursor, "|");
+	REQUIRE(out == expected);
+}
+
+TEST_CASE("Unit_ReformatLikeText")
+{
+	Unit hz(Unit::UNIT_HZ);
+	Unit volts(Unit::UNIT_VOLTS);
+
+	//Prefix is kept, and leading zeros keep the place of the cursor digit
+	CheckReformat(hz, "1| MHz", 200e3, "0|.2 MHz");
+	CheckReformat(hz, "1|0 MHz", 5e6, "0|5 MHz");
+	CheckReformat(hz, "1|00 MHz", 2e6, "0|02 MHz");
+	CheckReformat(hz, "5|0 MHz", 56e6, "5|6 MHz");
+
+	//Cursor after the ones digit, after the decimal mark, in the fraction, and beyond the number
+	CheckReformat(hz, "1| MHz", 1.25e6, "1|.25 MHz");
+	CheckReformat(hz, "1.|5 MHz", 3e6, "3.|0 MHz");
+	CheckReformat(hz, "2.4|5 GHz", 2.5e9, "2.5|0 GHz");
+	CheckReformat(hz, "2.4 |GHz", 2.5e9, "2.5 |GHz");
+
+	//Cursor before the digits is the place above the top digit
+	CheckReformat(hz, "|5 MHz", 12e6, "1|2 MHz");
+	CheckReformat(hz, "|5 MHz", 3e6, "|3 MHz");
+
+	//Signs
+	CheckReformat(volts, "-1|.5 V", -0.2, "-0|.2 V");
+	CheckReformat(volts, "-1|.5 V", 0.2, "0|.2 V");
+	CheckReformat(volts, "+1|.5 V", 0.2, "+0|.2 V");
+
+	//The result parses to the value
+	string out;
+	int outCursor;
+	REQUIRE(hz.ReformatLikeText(200e3, "1 MHz", 1, out, outCursor));
+	REQUIRE(fabs(hz.ParseString(out) - 200e3) < 1e-6);
+
+	//No number to format like
+	REQUIRE(!hz.ReformatLikeText(1e6, "Auto", 0, out, outCursor));
+}
