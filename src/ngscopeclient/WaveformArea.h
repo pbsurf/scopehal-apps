@@ -175,7 +175,7 @@ struct PeakLabel
 	uint64_t m_id;
 
 	///@brief X axis position of the label's centroid
-	int64_t m_labelXpos;
+	double m_labelXpos;
 
 	///@brief Y axis position of the label's centroid
 	float m_labelYpos;
@@ -722,7 +722,7 @@ protected:
 	ImVec2 m_tapZoomStart;
 
 	///@brief X axis position under the second tap of a double tap zoom, which stays fixed while zooming
-	int64_t m_tapZoomAnchor;
+	double m_tapZoomAnchor;
 
 	///@brief Horizontal scale of the group when the double tap zoom began
 	float m_tapZoomStartScale;
@@ -783,7 +783,7 @@ protected:
 	std::vector<std::shared_ptr<InputDescriptor> > m_channelsToRemove;
 
 	///@brief X axis position of the mouse at the most recent right click
-	int64_t m_lastRightClickOffset;
+	double m_lastRightClickOffset;
 
 	///@brief True if clearing persistence next render
 	std::atomic<bool> m_clearPersistence;

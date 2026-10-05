@@ -256,7 +256,7 @@ bool WaveformGroup::Render()
 	//scope, rather than keeping the time per pixel. The center of the plot stays where it was.
 	if(IsFixedGrid() && !m_displayingEye && (m_lastPlotWidth > 0) && (plotWidth > 0) && (plotWidth != m_lastPlotWidth))
 	{
-		int64_t center = m_xAxisOffset + PixelsToXAxisUnits(m_lastPlotWidth / 2);
+		double center = m_xAxisOffset + PixelsToXAxisUnits(m_lastPlotWidth / 2);
 		m_pixelsPerXUnit *= plotWidth / m_lastPlotWidth;
 		m_xAxisOffset = center - PixelsToXAxisUnits(plotWidth / 2);
 		ClearPersistence();
@@ -272,7 +272,7 @@ bool WaveformGroup::Render()
 	float pixelsPerXUnit = LimitPixelsPerXUnit(m_pixelsPerXUnit, plotWidth, true);
 	if( (m_pixelsPerXUnit > 0) && (fabs(pixelsPerXUnit / m_pixelsPerXUnit - 1) > 1e-6) )
 	{
-		int64_t center = m_xAxisOffset + PixelsToXAxisUnits(plotWidth / 2);
+		double center = m_xAxisOffset + PixelsToXAxisUnits(plotWidth / 2);
 		m_pixelsPerXUnit = pixelsPerXUnit;
 		m_xAxisOffset = center - PixelsToXAxisUnits(plotWidth / 2);
 		ClampXAxisOffset();
@@ -569,7 +569,7 @@ void WaveformGroup::DoCursorReadouts()
 /**
 	@brief Calculates the in-band power between two frequencies
  */
-float WaveformGroup::GetInBandPower(WaveformBase* wfm, Unit yunit, int64_t t1, int64_t t2)
+float WaveformGroup::GetInBandPower(WaveformBase* wfm, Unit yunit, double t1, double t2)
 {
 	auto swfm = dynamic_cast<SparseAnalogWaveform*>(wfm);
 	auto uwfm = dynamic_cast<UniformAnalogWaveform*>(wfm);
@@ -821,7 +821,7 @@ void WaveformGroup::RenderXAxisCursors(ImVec2 pos, ImVec2 size)
 		//plot so the label isn't cut off (with two cursors, the second one's label is to the right of it)
 		//Cursors are placed with the mouse, so only show as many digits as the distance between pixels allows
 		double pixelStep = (m_pixelsPerXUnit > 0) ? (1.0 / m_pixelsPerXUnit) : 0;
-		auto str = string("X1: ") + m_xAxisUnit.PrettyPrintInt64WithResolution(m_xAxisCursorPositions[0], pixelStep);
+		auto str = string("X1: ") + PrettyPrintXAxisValue(m_xAxisCursorPositions[0], pixelStep);
 		auto tsize = ImGui::CalcTextSize(str.c_str());
 		float padding = 2;
 		float wrounding = 2;
@@ -843,9 +843,9 @@ void WaveformGroup::RenderXAxisCursors(ImVec2 pos, ImVec2 size)
 		{
 			list->AddLine(ImVec2(xpos1, pos.y), ImVec2(xpos1, pos.y + size.y), cursor1_color, 1);
 
-			int64_t delta = m_xAxisCursorPositions[1] - m_xAxisCursorPositions[0];
-			str = string("X2: ") + m_xAxisUnit.PrettyPrintInt64WithResolution(m_xAxisCursorPositions[1], pixelStep) + "\n" +
-				"ΔX = " + m_xAxisUnit.PrettyPrintInt64WithResolution(delta, pixelStep);
+			double delta = m_xAxisCursorPositions[1] - m_xAxisCursorPositions[0];
+			str = string("X2: ") + PrettyPrintXAxisValue(m_xAxisCursorPositions[1], pixelStep) + "\n" +
+				"ΔX = " + PrettyPrintXAxisValue(delta, pixelStep);
 
 			//If X axis is time domain, show frequency dual
 			Unit hz(Unit::UNIT_HZ);
@@ -914,7 +914,7 @@ void WaveformGroup::RenderXAxisCursors(ImVec2 pos, ImVec2 size)
 		if(xpos < (pos.x + m_width - GetYAxisWidth()) )
 		{
 			m_xAxisCursorPositions[0] = XPositionToXAxisUnits(xpos);
-			m_parent->OnCursorMoved(m_xAxisCursorPositions[0]);
+			m_parent->OnCursorMoved(ClampToInt64(m_xAxisCursorPositions[0]));
 			if(m_xAxisCursorMode == X_CURSOR_DUAL)
 			{
 				m_dragState = DRAG_STATE_X_CURSOR1;
@@ -930,7 +930,7 @@ void WaveformGroup::RenderXAxisCursors(ImVec2 pos, ImVec2 size)
 	if( (m_xAxisCursorPositions[0] > m_xAxisCursorPositions[1]) && (m_xAxisCursorMode == X_CURSOR_DUAL) )
 	{
 		//Swap the cursors themselves
-		int64_t tmp = m_xAxisCursorPositions[0];
+		double tmp = m_xAxisCursorPositions[0];
 		m_xAxisCursorPositions[0] = m_xAxisCursorPositions[1];
 		m_xAxisCursorPositions[1] = tmp;
 
@@ -1000,7 +1000,7 @@ void WaveformGroup::DoCursor(int iCursor, DragState state)
 		m_xAxisCursorPositions[iCursor] = XPositionToXAxisUnits(mouse.x);
 
 		if(iCursor == 0)
-			m_parent->OnCursorMoved(m_xAxisCursorPositions[iCursor]);
+			m_parent->OnCursorMoved(ClampToInt64(m_xAxisCursorPositions[iCursor]));
 	}
 }
 
@@ -1192,18 +1192,35 @@ void WaveformGroup::RenderTimeline(float width, float height)
 
 	//Figure out rounding granularity, based on our time scales
 	float xscale = m_pixelsPerXUnit;
-	int64_t width_xunits = width / xscale;
+	double width_xunits = width / xscale;
 	auto round_divisor = GetRoundingDivisor(width_xunits);
 
 	//Labels are exact (as many digits as needed to tell them apart), so they get longer as we zoom in.
 	//They all use the SI prefix for the end of the visible range farthest from zero, so they match each other
 	//(e.g. "0 μs" rather than "0 fs" next to "1 μs")
 	float textMargin = 2;
-	int64_t scaleReference = max(
-		llabs(m_xAxisOffset),
-		llabs(m_xAxisOffset + width_xunits));
+	//(Beyond what fits in an int64_t, labels are only as exact as a double)
+	double scaleReference = max(
+		fabs(m_xAxisOffset),
+		fabs(m_xAxisOffset + width_xunits));
 	auto labelFor = [&](double t)
-	{ return m_xAxisUnit.PrettyPrintInt64WithScale(llround(t), scaleReference, Unit::MAX_INT64_DECIMALS); };
+	{
+		if(scaleReference < MAX_TICKS)
+		{
+			//Beyond 2^53 a double isn't a whole number of X axis units, so round to a power of ten above its
+			//precision (in integers, so the digits below that are exactly zero and get trimmed)
+			int64_t value = llround(t);
+			double precision = fabs(t) * DBL_EPSILON;
+			if(precision > 1)
+			{
+				int64_t step = llround(pow(10, ceil(log10(precision))));
+				value = llround(t / step) * step;
+			}
+			return m_xAxisUnit.PrettyPrintInt64WithScale(
+				value, llround(scaleReference), Unit::MAX_INT64_DECIMALS);
+		}
+		return m_xAxisUnit.PrettyPrint(t);
+	};
 
 	//Fixed divisions: ticks at even fractions of the plot width, like the graticule of a scope. The center line is
 	//labeled with its value and the others with their offset from it, so the labels stay round and show the scale per
@@ -1294,7 +1311,7 @@ void WaveformGroup::RenderTimeline(float width, float height)
 		//Figure out about how much time per graduation to use
 		//If the labels don't fit at that spacing, space them out more
 		double min_grad_width = min_label_grad_width;
-		int64_t grad_xunits_rounded = 0;
+		double grad_xunits_rounded = 0;
 		for(int pass = 0; pass < 3; pass++)
 		{
 			double grad_xunits_nominal = min_grad_width / xscale;
@@ -1312,8 +1329,12 @@ void WaveformGroup::RenderTimeline(float width, float height)
 			//Check how wide the labels are
 			double first = round(m_xAxisOffset / grad_xunits_rounded) * grad_xunits_rounded;
 			float widest = 0;
-			for(double t = first - grad_xunits_rounded; t < (first + width_xunits + grad_xunits_rounded); t += grad_xunits_rounded)
+			int64_t ngrads = ceil(width_xunits / grad_xunits_rounded) + 2;
+			for(int64_t i = 0; i < ngrads; i++)
+			{
+				double t = first + (i - 1) * grad_xunits_rounded;
 				widest = max(widest, ImGui::CalcTextSize(labelFor(t).c_str()).x);
+			}
 			double needed = widest + 2*textMargin + ImGui::GetFontSize();
 			if( (grad_xunits_rounded * xscale) >= needed)
 				break;
@@ -1337,8 +1358,12 @@ void WaveformGroup::RenderTimeline(float width, float height)
 		double tstart = round(m_xAxisOffset / grad_xunits_rounded) * grad_xunits_rounded;
 
 		//Print tick marks and labels
-		for(double t = tstart - grad_xunits_rounded; t < (tstart + width_xunits + grad_xunits_rounded); t += grad_xunits_rounded)
+		//(Counting graduations rather than adding to t, which can stop changing if it's large and the graduations are
+		//below double precision)
+		int64_t ngrads = ceil(width_xunits / grad_xunits_rounded) + 2;
+		for(int64_t i = 0; i < ngrads; i++)
 		{
+			double t = tstart + (i - 1) * grad_xunits_rounded;
 			double x = (t - m_xAxisOffset) * xscale;
 
 			//Draw fine ticks first (even if the labeled graduation doesn't fit)
@@ -1462,7 +1487,7 @@ void WaveformGroup::RenderTriggerPositionArrows(ImVec2 pos, float height)
 	{
 		if(ImGui::IsMouseReleased(ImGuiMouseButton_Left))
 		{
-			auto newTriggerPos = XPositionToXAxisUnits(mouse.x);
+			int64_t newTriggerPos = ClampToInt64(XPositionToXAxisUnits(mouse.x));
 			Unit fs(Unit::UNIT_FS);
 
 			//Primary of a multiscope group? Might have to realign secondaries since trigger can snap
@@ -1528,11 +1553,11 @@ void WaveformGroup::TimelineContextMenu(float width)
 	//Fit the range between the cursors, with a little room either side so the cursors aren't on the edges of the plot
 	if( (m_xAxisCursorMode == X_CURSOR_DUAL) && !m_displayingEye)
 	{
-		int64_t start = min(m_xAxisCursorPositions[0], m_xAxisCursorPositions[1]);
-		int64_t end = max(m_xAxisCursorPositions[0], m_xAxisCursorPositions[1]);
+		double start = min(m_xAxisCursorPositions[0], m_xAxisCursorPositions[1]);
+		double end = max(m_xAxisCursorPositions[0], m_xAxisCursorPositions[1]);
 		if(ImGui::MenuItem("Zoom to Cursors", nullptr, false, end > start))
 		{
-			int64_t margin = (end - start) / 20;
+			double margin = (end - start) / 20;
 			ZoomToXRange(start - margin, end + margin, width);
 		}
 	}
@@ -1630,7 +1655,7 @@ void WaveformGroup::OnMouseWheel(float delta, float delta_h)
 		return;
 	}
 
-	int64_t target = XPositionToXAxisUnits(ImGui::GetIO().MousePos.x);
+	double target = XPositionToXAxisUnits(ImGui::GetIO().MousePos.x);
 
 	//With a fixed grid, step through 1-2-5 scales
 	if(IsFixedGrid())
@@ -1649,9 +1674,9 @@ void WaveformGroup::OnMouseWheel(float delta, float delta_h)
 /**
 	@brief Decide on reasonable rounding intervals for X axis scale ticks
  */
-int64_t WaveformGroup::GetRoundingDivisor(int64_t width_xunits)
+double WaveformGroup::GetRoundingDivisor(double width_xunits)
 {
-	int64_t round_divisor = 1;
+	double round_divisor = 1;
 
 	if(width_xunits < 1E7)
 	{
@@ -1715,10 +1740,10 @@ void WaveformGroup::ClearPersistenceOfChannel(OscilloscopeChannel* chan)
 /**
 	@brief Zoom in, keeping timestamp "target" at the same pixel position
  */
-void WaveformGroup::OnZoomInHorizontal(int64_t target, float step)
+void WaveformGroup::OnZoomInHorizontal(double target, float step)
 {
 	//Calculate the *current* position of the target within the window
-	float delta = target - m_xAxisOffset;
+	double delta = target - m_xAxisOffset;
 
 	//Change the zoom
 	m_pixelsPerXUnit *= step;
@@ -1728,7 +1753,7 @@ void WaveformGroup::OnZoomInHorizontal(int64_t target, float step)
 	ClearPersistence();
 }
 
-void WaveformGroup::OnZoomOutHorizontal(int64_t target, float step)
+void WaveformGroup::OnZoomOutHorizontal(double target, float step)
 {
 	//TODO: Clamp to bounds of all waveforms in the group
 	//(not width of single widest waveform, as they may have different offsets)
@@ -1743,7 +1768,7 @@ void WaveformGroup::OnZoomOutHorizontal(int64_t target, float step)
 	}
 
 	//Calculate the *current* position of the target within the window
-	float delta = target - m_xAxisOffset;
+	double delta = target - m_xAxisOffset;
 
 	//Change the zoom
 	m_pixelsPerXUnit /= step;
@@ -1774,7 +1799,7 @@ void WaveformGroup::OnPanHorizontal(float step)
 	@param delta	Mouse wheel steps (positive zooms in). Fractions of a step (e.g. from touchpads) add up until there's a
 					whole step.
  */
-void WaveformGroup::OnZoomHorizontalSnapped(int64_t target, float xpos, float delta)
+void WaveformGroup::OnZoomHorizontalSnapped(double target, float xpos, float delta)
 {
 	m_snapZoomWheel += delta;
 	int steps = trunc(m_snapZoomWheel);
@@ -1849,13 +1874,13 @@ void WaveformGroup::NavigateToTimestamp(int64_t timestamp, int64_t duration, Str
 	if(duration > 0)
 	{
 		//If the packet is too long to fit on screen at the current zoom, have it start 10% of the way across
-		int64_t viewWidth = PixelsToXAxisUnits(GetPlotWidth());
+		double viewWidth = PixelsToXAxisUnits(GetPlotWidth());
 		if(duration > viewWidth)
 			m_xAxisOffset = timestamp - viewWidth*0.1;
 
 		//Otherwise, the entire packet fits. Center it.
 		else
-			m_xAxisOffset = timestamp - viewWidth/2 + duration/2;
+			m_xAxisOffset = timestamp - viewWidth/2 + duration/2.0;
 	}
 
 	//Just center the packet
@@ -1885,7 +1910,7 @@ bool WaveformGroup::LoadConfiguration(const YAML::Node& node)
 	}
 
 	m_pixelsPerXUnit = node["pixelsPerXUnit"].as<float>();
-	m_xAxisOffset = node["xAxisOffset"].as<long long>();
+	m_xAxisOffset = node["xAxisOffset"].as<double>();
 
 	//Default to no cursors
 	m_xAxisCursorMode = WaveformGroup::X_CURSOR_NONE;
@@ -1905,8 +1930,8 @@ bool WaveformGroup::LoadConfiguration(const YAML::Node& node)
 	else if(cursor == "y_dual")
 		m_cursorConfig = WaveformGroup::CURSOR_Y_DUAL;
 	*/
-	m_xAxisCursorPositions[0] = node["xcursor0"].as<long long>();
-	m_xAxisCursorPositions[1] = node["xcursor1"].as<long long>();
+	m_xAxisCursorPositions[0] = node["xcursor0"].as<double>();
+	m_xAxisCursorPositions[1] = node["xcursor1"].as<double>();
 	/*
 	m_yCursorPos[0] = node["ycursor0"].as<float>();
 	m_yCursorPos[1] = node["ycursor1"].as<float>();
@@ -1975,7 +2000,7 @@ YAML::Node WaveformGroup::SerializeConfiguration(IDTable& table)
 	@param end		Timestamp for the right edge of the plot
 	@param width	Width of the plot, in pixels
  */
-void WaveformGroup::ZoomToXRange(int64_t start, int64_t end, float width)
+void WaveformGroup::ZoomToXRange(double start, double end, float width)
 {
 	if(end <= start)
 		return;
@@ -2002,17 +2027,34 @@ void WaveformGroup::ZoomToXRange(int64_t start, int64_t end, float width)
  */
 float WaveformGroup::LimitPixelsPerXUnit(float pixelsPerXUnit, float width, bool roundNearest)
 {
+	//X axis positions are doubles, so don't zoom in so far that pixels are close to their precision
+	//(for values beyond 2^53, which can't be represented to the nearest unit, such as times over 9 seconds in fs).
+	//Measured at whichever edge of the view is farther from zero.
+	double minUnitsPerPixel = 0;
+	if( (width > 0) && (pixelsPerXUnit > 0) )
+	{
+		double edge = max(fabs(m_xAxisOffset), fabs(m_xAxisOffset + width / pixelsPerXUnit));
+		minUnitsPerPixel = 16 * edge * DBL_EPSILON;
+	}
+
 	if(!IsFixedGrid() || m_displayingEye || (width <= 0) || (pixelsPerXUnit <= 0) )
+	{
+		if(minUnitsPerPixel > 0)
+			pixelsPerXUnit = min(pixelsPerXUnit, static_cast<float>(1 / minUnitsPerPixel));
 		return max(pixelsPerXUnit, GetMinPixelsPerXUnit());
+	}
 
 	int ndivs = GetHorizontalDivisions();
 	double unitsPerDiv = width / (ndivs * pixelsPerXUnit);
 	unitsPerDiv = roundNearest ? Round125(unitsPerDiv) : Ceil125(unitsPerDiv);
 
 	//X axis units are integers (e.g. fs), so don't go below one per division,
-	//and don't show more than MAX_X_SPAN (the largest value in the sequence that fits)
+	//and don't show more than the widest view we allow (the largest value in the sequence that fits)
 	unitsPerDiv = max(unitsPerDiv, 1.0);
-	unitsPerDiv = min(unitsPerDiv, Floor125(static_cast<double>(MAX_X_SPAN) / ndivs));
+	double minUnitsPerDiv = minUnitsPerPixel * width / ndivs;
+	if(unitsPerDiv < minUnitsPerDiv)
+		unitsPerDiv = Ceil125(minUnitsPerDiv);
+	unitsPerDiv = min(unitsPerDiv, Floor125(MAX_X_SPAN_TICKS * GetFinestTimescale() / ndivs));
 
 	return width / (ndivs * unitsPerDiv);
 }
@@ -2026,7 +2068,7 @@ float WaveformGroup::LimitPixelsPerXUnit(float pixelsPerXUnit, float width, bool
 	@param roundNearest		With a fixed grid, round the scale to the nearest 1-2-5 step rather than zooming out to
 							the next one (see LimitPixelsPerXUnit())
  */
-void WaveformGroup::ZoomHorizontalAround(int64_t target, float xpos, float pixelsPerXUnit, bool roundNearest)
+void WaveformGroup::ZoomHorizontalAround(double target, float xpos, float pixelsPerXUnit, bool roundNearest)
 {
 	if(pixelsPerXUnit <= 0)
 		return;
@@ -2040,7 +2082,7 @@ void WaveformGroup::ZoomHorizontalAround(int64_t target, float xpos, float pixel
 /**
 	@brief Scrolls the view so an X axis value is at the center of the plot, without changing the zoom
  */
-void WaveformGroup::CenterOnXAxisValue(int64_t x)
+void WaveformGroup::CenterOnXAxisValue(double x)
 {
 	m_xAxisOffset = x - PixelsToXAxisUnits(GetPlotWidth() / 2);
 	ClampXAxisOffset();
@@ -2048,7 +2090,8 @@ void WaveformGroup::CenterOnXAxisValue(int64_t x)
 }
 
 /**
-	@brief Gets the smallest horizontal scale we allow, at which the plot shows MAX_X_SPAN X axis units
+	@brief Gets the smallest horizontal scale we allow, at which the plot shows MAX_X_SPAN_TICKS of the finest
+	timescale in the group
 
 	Returns 0 (no limit) before the first render, when the plot width isn't known yet.
  */
@@ -2057,14 +2100,55 @@ float WaveformGroup::GetMinPixelsPerXUnit()
 	float plotWidth = GetPlotWidth();
 	if(plotWidth <= 0)
 		return 0;
-	return plotWidth / MAX_X_SPAN;
+	return plotWidth / (MAX_X_SPAN_TICKS * GetFinestTimescale());
+}
+
+/**
+	@brief Gets the smallest timescale (X axis units per tick) of the waveforms in the group, or 1 if there are none
+
+	This sets how wide the view can be: waveform ticks are int64_t, so a waveform with coarse ticks (e.g. a trend
+	recorded over hours) can be shown over a wider span than one with fine ticks. The rendering code converts the view
+	to ticks of each waveform.
+ */
+double WaveformGroup::GetFinestTimescale()
+{
+	int64_t finest = INT64_MAX;
+	auto areas = GetWaveformAreas();
+	for(auto a : areas)
+	{
+		for(size_t i=0; i<a->GetStreamCount(); i++)
+		{
+			auto data = a->GetStream(i).GetData();
+			if( (data == nullptr) || (data->m_timescale <= 0) )
+				continue;
+			finest = min(finest, data->m_timescale);
+		}
+	}
+
+	if(finest == INT64_MAX)
+		return 1;
+	return finest;
+}
+
+/**
+	@brief Prints an X axis value, showing only the digits that are meaningful at a resolution (see
+	Unit::PrettyPrintInt64WithResolution())
+
+	Values too large for an int64_t are printed with the default number of digits.
+ */
+string WaveformGroup::PrettyPrintXAxisValue(double value, double resolution)
+{
+	if(fabs(value) < MAX_TICKS)
+		return m_xAxisUnit.PrettyPrintInt64WithResolution(llround(value), resolution);
+	return m_xAxisUnit.PrettyPrint(value);
 }
 
 /**
 	@brief Keeps the view within the range of X axis values we can handle, and from scrolling past the start of the
 	data where that makes sense
 
-	The left edge is kept within +/- MAX_X_OFFSET, so that everything on screen fits in an int64_t.
+	The left edge is kept within +/- MAX_X_OFFSET_TICKS of the finest timescale in the group, so that everything on
+	screen fits in an int64_t number of ticks of every waveform.
 
 	Scrolling past the start of the data is only prevented for frequency domain plots where every waveform starts at
 	or above 0 Hz (e.g. the FFT of a real valued signal): the left edge of the view is not allowed to go below 0 Hz,
@@ -2075,7 +2159,8 @@ float WaveformGroup::GetMinPixelsPerXUnit()
  */
 void WaveformGroup::ClampXAxisOffset()
 {
-	m_xAxisOffset = clamp(m_xAxisOffset, -MAX_X_OFFSET, MAX_X_OFFSET);
+	double maxOffset = MAX_X_OFFSET_TICKS * GetFinestTimescale();
+	m_xAxisOffset = clamp(m_xAxisOffset, -maxOffset, maxOffset);
 
 	auto type = m_xAxisUnit.GetType();
 	if( (type != Unit::UNIT_HZ) && (type != Unit::UNIT_MICROHZ) )
@@ -2154,8 +2239,9 @@ void WaveformGroup::AutofitHorizontal(float width)
 	LogTrace("horizontal autoscale\n");
 
 	//Find beginning and end of all waveforms in the group
-	int64_t start = INT64_MAX;
-	int64_t end = -INT64_MAX;
+	//(in double precision, since a waveform with coarse ticks can span more X axis units than fit in an int64_t)
+	double start = DBL_MAX;
+	double end = -DBL_MAX;
 	bool dataFound = false;
 	auto areas = GetWaveformAreas();
 	for(auto a : areas)
@@ -2177,10 +2263,12 @@ void WaveformGroup::AutofitHorizontal(float width)
 			{
 				dataFound = true;
 
-				int64_t wstart = GetOffsetScaled(sdata, udata, 0);
-				int64_t wend =
-					GetOffsetScaled(sdata, udata, data->size()-1) +
-					GetDurationScaled(sdata, udata, data->size()-1);
+				size_t last = data->size() - 1;
+				double timescale = data->m_timescale;
+				double wstart = GetOffset(sdata, udata, 0) * timescale + data->m_triggerPhase;
+				double wend =
+					(GetOffset(sdata, udata, last) + GetDuration(sdata, udata, last)) * timescale +
+					data->m_triggerPhase;
 
 				start = min(start, wstart);
 				end = max(end, wend);
@@ -2191,12 +2279,12 @@ void WaveformGroup::AutofitHorizontal(float width)
 			{
 				dataFound = true;
 				start = 0;
-				end = ddata->GetWidth() * ddata->m_timescale;
+				end = static_cast<double>(ddata->GetWidth()) * ddata->m_timescale;
 			}
 		}
 	}
 
-	int64_t sigwidth = end - start;
+	double sigwidth = end - start;
 
 	//Don't divide by zero if no data!
 	//(With a fixed grid, the scale is rounded up to the 1-2-5 sequence and the waveform centered)

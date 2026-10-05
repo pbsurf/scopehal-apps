@@ -1315,7 +1315,8 @@ void WaveformArea::PlotContextMenu()
 			if(ImGui::MenuItem("Add Marker"))
 			{
 				auto& session = m_parent->GetSession();
-				session.AddMarker(Marker(GetWaveformTimestamp(), m_lastRightClickOffset, session.GetNextMarkerName()));
+				session.AddMarker(Marker(
+					GetWaveformTimestamp(), WaveformGroup::ClampToInt64(m_lastRightClickOffset), session.GetNextMarkerName()));
 			}
 		}
 
@@ -1680,7 +1681,7 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 
 	//Distance within which a peak is considered to be the same one as last time
 	float neighborThresholdPixels = 3 * ImGui::GetFontSize();
-	int64_t neighborThresholdXUnits = m_group->PixelsToXAxisUnits(neighborThresholdPixels);
+	int64_t neighborThresholdXUnits = WaveformGroup::ClampToInt64(m_group->PixelsToXAxisUnits(neighborThresholdPixels));
 
 	//A label keeps its peak for at least the dwell time (in seconds). After that, a peak without a label only takes
 	//a label from a labeled peak if it's taller by the margin, or has been taller for the dwell time.
@@ -1822,7 +1823,7 @@ void WaveformArea::RenderSpectrumPeaks(ImDrawList* list, shared_ptr<DisplayedCha
 		if(!isFree[i])
 			continue;
 		for(size_t t=0; t<targets.size(); t++)
-			moves.push_back({llabs(labels[i].m_labelXpos - peaks[targets[t]].m_x), i, t});
+			moves.push_back({WaveformGroup::ClampToInt64(fabs(labels[i].m_labelXpos - peaks[targets[t]].m_x)), i, t});
 	}
 	sort(moves.begin(), moves.end(), [](const LabelMove& a, const LabelMove& b) { return a.dist < b.dist; });
 	vector<bool> targetDone(targets.size(), false);
@@ -2420,8 +2421,7 @@ void WaveformArea::RenderProtocolWaveform(std::shared_ptr<DisplayedChannel> chan
 	auto list = ImGui::GetWindowDrawList();
 
 	//Calculate a bunch of constants
-	int64_t offset = m_group->GetXAxisOffset();
-	int64_t offset_samples = (offset - data->m_triggerPhase) / data->m_timescale;
+	int64_t offset_samples = WaveformGroup::XAxisUnitsToTicks(m_group->GetXAxisOffset(), data);
 
 	//Find the index of the first sample visible on screen
 	data->PrepareForCpuAccess();
@@ -2445,8 +2445,8 @@ void WaveformArea::RenderProtocolWaveform(std::shared_ptr<DisplayedChannel> chan
 	const double mincellwidth = 2;
 	for(size_t i=ifirst; i<len; i++)
 	{
-		int64_t tstart = (data->m_offsets[i] * data->m_timescale) + data->m_triggerPhase;
-		int64_t end = tstart + (data->m_durations[i] * data->m_timescale);
+		double tstart = (data->m_offsets[i] * static_cast<double>(data->m_timescale)) + data->m_triggerPhase;
+		double end = tstart + (data->m_durations[i] * static_cast<double>(data->m_timescale));
 
 		double xs = m_group->XAxisUnitsToXPosition(tstart);
 		double xe = m_group->XAxisUnitsToXPosition(end);
@@ -2463,9 +2463,7 @@ void WaveformArea::RenderProtocolWaveform(std::shared_ptr<DisplayedChannel> chan
 			//This sample is really skinny. There's no text to render so don't waste time with that.
 
 			//Calculate the end timestamp of the decode bubble we're drawing
-			int64_t cellend = m_group->XPositionToXAxisUnits(xs + mincellwidth);
-			cellend -= data->m_triggerPhase;
-			cellend /= data->m_timescale;
+			int64_t cellend = WaveformGroup::XAxisUnitsToTicks(m_group->XPositionToXAxisUnits(xs + mincellwidth), data);
 
 			//Average the color of all samples touching this pixel
 			size_t nmerged = 1;
@@ -2553,8 +2551,7 @@ void WaveformArea::RenderUniformDigitalBusWaveform(
 	auto list = ImGui::GetWindowDrawList();
 
 	//Calculate a bunch of constants
-	int64_t offset = m_group->GetXAxisOffset();
-	int64_t offset_samples = (offset - data->m_triggerPhase) / data->m_timescale;
+	int64_t offset_samples = WaveformGroup::XAxisUnitsToTicks(m_group->GetXAxisOffset(), data);
 
 	//Find the index of the first sample visible on screen
 	data->PrepareForCpuAccess();
@@ -2603,7 +2600,7 @@ void WaveformArea::RenderUniformDigitalBusWaveform(
 	string field;
 	for(size_t i=ifirst; i<len; i++)
 	{
-		int64_t tstart = (i * data->m_timescale) + data->m_triggerPhase;
+		double tstart = (i * static_cast<double>(data->m_timescale)) + data->m_triggerPhase;
 		double xs = m_group->XAxisUnitsToXPosition(tstart);
 
 		//Merge consecutive samples with the same value
@@ -2617,7 +2614,7 @@ void WaveformArea::RenderUniformDigitalBusWaveform(
 		i = imerge;
 
 		//End of merged sample
-		int64_t end = ( (imerge + 1) * data->m_timescale) + data->m_triggerPhase;
+		double end = ( (imerge + 1) * static_cast<double>(data->m_timescale)) + data->m_triggerPhase;
 		double xe = m_group->XAxisUnitsToXPosition(end);
 
 		if(xe < start.x)
@@ -3004,10 +3001,12 @@ void WaveformArea::RasterizeAnalogOrDigitalWaveform(
 	shared_ptr<ComputePipeline> comp;
 
 	//Calculate a bunch of constants
-	int64_t offset = m_group->GetXAxisOffset();
-	int64_t innerxoff = offset / data->m_timescale;
-	int64_t fractional_offset = offset % data->m_timescale;
-	int64_t offset_samples = (offset - data->m_triggerPhase) / data->m_timescale;
+	//(The view offset is a double, which may be beyond what fits in an int64_t number of X axis units, so split it
+	//into whole ticks and a fraction of a tick before going to integers)
+	double offset = m_group->GetXAxisOffset();
+	int64_t innerxoff = WaveformGroup::ClampToInt64(floor(offset / data->m_timescale));
+	double fractional_offset = offset - innerxoff * static_cast<double>(data->m_timescale);
+	int64_t offset_samples = WaveformGroup::XAxisUnitsToTicks(offset, data);
 	double pixelsPerX = m_group->GetPixelsPerXUnit();
 	double xscale = data->m_timescale * pixelsPerX;
 
@@ -3108,6 +3107,7 @@ void WaveformArea::RasterizeAnalogOrDigitalWaveform(
 	//TODO: make this constant, then apply a second alpha pass in tone mapping?
 	//This will eliminate the need for a (potentially heavy) re-render when adjusting the slider.
 	float alpha = m_parent->GetTraceAlpha();
+	//(In ticks, since the length in X axis units may not fit in an int64_t)
 	auto end = data->size() - 1;
 	int64_t firstOff;
 	int64_t lastOff;
@@ -3115,16 +3115,16 @@ void WaveformArea::RasterizeAnalogOrDigitalWaveform(
 	{
 		//Data is sparse. Do a special peek copy to reduce the overhead vs a full copy
 		sdata->m_offsets.PrepareForCpuAccessFirstAndLastOnly();
-		firstOff = GetOffsetScaled(sdata, 0);
-		lastOff = GetOffsetScaled(sdata, end);
+		firstOff = GetOffset(sdata, 0);
+		lastOff = GetOffset(sdata, end);
 	}
 	else
 	{
 		//This doesn't need the waveform on the CPU, the count is all we care about
-		firstOff = GetOffsetScaled(udata, 0);
-		lastOff = GetOffsetScaled(udata, end);
+		firstOff = GetOffset(udata, 0);
+		lastOff = GetOffset(udata, end);
 	}
-	float capture_len = lastOff - firstOff;
+	float capture_len = static_cast<double>(lastOff - firstOff) * data->m_timescale;
 	float avg_sample_len = capture_len / data->size();
 	float samplesPerPixel = 1.0 / (pixelsPerX * avg_sample_len);
 	float alpha_scaled = alpha / sqrt(samplesPerPixel);
@@ -3261,8 +3261,7 @@ void WaveformArea::ToneMapWaterfallWaveform(
 		texmgr->GetView(channel->m_colorRamp),
 		vk::ImageLayout::eShaderReadOnlyOptimal);
 
-	int64_t offset = m_group->GetXAxisOffset();
-	int64_t offset_samples = (offset - data->m_triggerPhase) / data->m_timescale;
+	int64_t offset_samples = WaveformGroup::XAxisUnitsToTicks(m_group->GetXAxisOffset(), data);
 
 	double pixelsPerX = m_group->GetPixelsPerXUnit();
 	double xscale = data->m_timescale * pixelsPerX;
@@ -3321,8 +3320,7 @@ void WaveformArea::ToneMapSpectrogramWaveform(
 		texmgr->GetView(channel->m_colorRamp),
 		vk::ImageLayout::eShaderReadOnlyOptimal);
 
-	int64_t offset = m_group->GetXAxisOffset();
-	int64_t offset_samples = (offset - data->m_triggerPhase) / data->m_timescale;
+	int64_t offset_samples = WaveformGroup::XAxisUnitsToTicks(m_group->GetXAxisOffset(), data);
 
 	//Invert X (and Y) scales because multiply in the shader is faster than divide
 	double xscale = 1.0 / (data->m_timescale * m_group->GetPixelsPerXUnit());
@@ -4429,7 +4427,7 @@ void WaveformArea::RenderBERLevelArrows(ImVec2 start, ImVec2 /*size*/)
 		if( (m_dragState == DRAG_STATE_BER_LEVEL) || (m_dragState == DRAG_STATE_BER_BOTH) )
 			m_triggerLevelDuringDrag = YPositionToYAxisUnits(mouse.y);
 		if(m_dragState == DRAG_STATE_BER_BOTH)
-			m_xAxisPosDuringDrag = m_group->XPositionToXAxisUnits(mouse.x);
+			m_xAxisPosDuringDrag = WaveformGroup::ClampToInt64(m_group->XPositionToXAxisUnits(mouse.x));
 	}
 }
 
@@ -5809,7 +5807,7 @@ void WaveformArea::OnMouseWheelPlotArea(float delta, float delta_h)
 		delta = 0;
 	}
 
-	int64_t target = m_group->XPositionToXAxisUnits(ImGui::GetIO().MousePos.x);
+	double target = m_group->XPositionToXAxisUnits(ImGui::GetIO().MousePos.x);
 
 	//If we have both X and Y deltas, use the larger one and ignore incidental movement in the other axis
 	if(fabs(delta) > fabs(delta_h) )
@@ -6150,7 +6148,7 @@ bool WaveformArea::GetDetectorRange(
 	if(w == 0)
 		return false;
 
-	int64_t xoff = m_group->GetXAxisOffset();
+	double xoff = m_group->GetXAxisOffset();
 	double pixelsPerX = m_group->GetPixelsPerXUnit();
 	float* samples = sdata ? sdata->m_samples.GetCpuPointer() : udata->m_samples.GetCpuPointer();
 	size_t len = sdata ? sdata->size() : udata->size();

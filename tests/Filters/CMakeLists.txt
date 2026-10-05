@@ -11,6 +11,7 @@ add_executable(Filters
 	Filter_ScalarStairstep.cpp
 	Filter_SpectrumStitch.cpp
 	Filter_Subtract.cpp
+	Filter_Trend.cpp
 	Filter_Upsample.cpp
 	FilterGraphExecutor.cpp
 

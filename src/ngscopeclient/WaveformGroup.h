@@ -75,10 +75,10 @@ public:
 
 	void MoveArea(WaveformArea& area, size_t newPosition);
 
-	void OnZoomInHorizontal(int64_t target, float step);
-	void OnZoomOutHorizontal(int64_t target, float step);
+	void OnZoomInHorizontal(double target, float step);
+	void OnZoomOutHorizontal(double target, float step);
 	void OnPanHorizontal(float step);
-	void OnZoomHorizontalSnapped(int64_t target, float xpos, float delta);
+	void OnZoomHorizontalSnapped(double target, float xpos, float delta);
 	void OnPanPixels(float dx);
 	void NavigateToTimestamp(
 		int64_t timestamp,
@@ -93,35 +93,57 @@ public:
 	Unit GetXAxisUnit()
 	{ return m_xAxisUnit; }
 
+	/*
+		X axis positions in the view are doubles, so the view can span more than fits in an int64_t (about 2.5 hours,
+		in fs). Waveforms are still int64_t ticks: use XAxisUnitsToTicks() to convert, since a waveform with a fine
+		timescale can't represent every position in the view.
+	 */
+
 	/**
 		@brief Converts a position in pixels (relative to left side of plot) to X axis units (relative to time zero)
 	 */
-	int64_t XPositionToXAxisUnits(float pix)
+	double XPositionToXAxisUnits(float pix)
 	{ return m_xAxisOffset + PixelsToXAxisUnits(pix - m_xpos); }
 
 	/**
 		@brief Converts a distance measurement in pixels to X axis units
 	 */
-	int64_t PixelsToXAxisUnits(float pix)
+	double PixelsToXAxisUnits(float pix)
 	{ return pix / m_pixelsPerXUnit; }
 
 	/**
 		@brief Converts a distance measurement in X axis units to pixels
 	 */
-	float XAxisUnitsToPixels(int64_t t)
+	float XAxisUnitsToPixels(double t)
 	{ return t * m_pixelsPerXUnit; }
 
 	/**
 		@brief Converts a position in X axis units to pixels (in window coordinates)
 	 */
-	float XAxisUnitsToXPosition(int64_t t)
+	float XAxisUnitsToXPosition(double t)
 	{ return XAxisUnitsToPixels(t - m_xAxisOffset) + m_xpos; }
 
 	float GetPixelsPerXUnit()
 	{ return m_pixelsPerXUnit; }
 
-	int64_t GetXAxisOffset()
+	double GetXAxisOffset()
 	{ return m_xAxisOffset; }
+
+	/**
+		@brief Converts an X axis position to a whole number of a waveform's ticks (rounded down), clamped to what fits
+		in an int64_t
+	 */
+	static int64_t XAxisUnitsToTicks(double x, const WaveformBase* wfm)
+	{ return ClampToInt64(floor( (x - wfm->m_triggerPhase) / wfm->m_timescale)); }
+
+	/**
+		@brief Converts a double to an int64_t, clamping values that don't fit (rather than the undefined behavior of a
+		plain conversion)
+	 */
+	static int64_t ClampToInt64(double x)
+	{ return std::clamp(x, -MAX_TICKS, MAX_TICKS); }
+
+	std::string PrettyPrintXAxisValue(double value, double resolution);
 
 	///@brief X positions of vertical major grid lines (computed by RenderTimeline()), relative to the plot's left edge
 	const std::vector<float>& GetMajorGridPositions()
@@ -206,10 +228,10 @@ public:
 	{ return !m_displayingEye && !m_mouseOverMarker && (m_dragState == DRAG_STATE_NONE); }
 
 	void AutofitHorizontal(float width);
-	void ZoomToXRange(int64_t start, int64_t end, float width);
-	void ZoomHorizontalAround(int64_t target, float xpos, float pixelsPerXUnit, bool roundNearest = false);
+	void ZoomToXRange(double start, double end, float width);
+	void ZoomHorizontalAround(double target, float xpos, float pixelsPerXUnit, bool roundNearest = false);
 	float LimitPixelsPerXUnit(float pixelsPerXUnit, float width, bool roundNearest = false);
-	void CenterOnXAxisValue(int64_t x);
+	void CenterOnXAxisValue(double x);
 
 protected:
 	void RenderTimeline(float width, float height);
@@ -224,7 +246,7 @@ protected:
 
 	void TitleHoverHelp();
 
-	float GetInBandPower(WaveformBase* wfm, Unit yunit, int64_t t1, int64_t t2);
+	float GetInBandPower(WaveformBase* wfm, Unit yunit, double t1, double t2);
 
 	bool IsMouseOverButtonInWaveformArea();
 
@@ -240,22 +262,26 @@ protected:
 
 	void DoCursor(int iCursor, DragState state);
 
-	int64_t GetRoundingDivisor(int64_t width_xunits);
+	double GetRoundingDivisor(double width_xunits);
 	void OnMouseWheel(float delta, float delta_h);
 	void ClampXAxisOffset();
 	bool UseAbsoluteXAxisLabels();
 	float GetMinPixelsPerXUnit();
+	double GetFinestTimescale();
 
 	/**
-		@brief Widest view we allow, in X axis units
+		@brief Widest view we allow, in ticks of the finest timescale of the waveforms in the group
 
-		X axis values are int64_t (fs for time domain plots), which only reach about 9.2e18 (2.5 hours). This is
-		500 s/div over 10 divisions, leaving room for the view to be offset from zero.
+		Waveform ticks are int64_t, which only reach about 9.2e18 (2.5 hours of fs). This leaves room for the view to
+		be offset from zero.
 	 */
-	static constexpr double MAX_X_SPAN = 5e18;
+	static constexpr double MAX_X_SPAN_TICKS = 5e18;
 
-	///@brief Farthest the left edge of the view can be from zero, so the right edge fits in an int64_t
-	static constexpr int64_t MAX_X_OFFSET = 4e18;
+	///@brief Farthest the left edge of the view can be from zero, in ticks, so the right edge fits in an int64_t
+	static constexpr double MAX_X_OFFSET_TICKS = 4e18;
+
+	///@brief Largest tick count ClampToInt64() returns, comfortably below the largest int64_t
+	static constexpr double MAX_TICKS = 9e18;
 
 	///@brief Top level window we're attached to
 	MainWindow* m_parent;
@@ -273,7 +299,7 @@ protected:
 	float m_lastPlotWidth;
 
 	///@brief X axis position of the left edge of our view
-	int64_t m_xAxisOffset;
+	double m_xAxisOffset;
 
 	///@brief Mouse wheel motion not yet used by OnZoomHorizontalSnapped() (less than one step)
 	float m_snapZoomWheel;
@@ -340,7 +366,7 @@ public:
 	} m_xAxisCursorMode;
 
 	///@brief Position (in X axis units) of each cursor
-	int64_t m_xAxisCursorPositions[2];
+	double m_xAxisCursorPositions[2];
 };
 
 #endif
