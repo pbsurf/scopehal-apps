@@ -738,7 +738,7 @@ void WaveformGroup::RenderMarkers(ImVec2 pos, ImVec2 size)
 			m_dragState = DRAG_STATE_NONE;
 		}
 
-		auto newpos = XPositionToXAxisUnits(mouse.x);
+		int64_t newpos = ClampToInt64(XPositionToXAxisUnits(mouse.x));
 		if(m_dragMarker->m_offset != newpos)
 		{
 			auto name = m_dragMarker->m_name;
@@ -1956,10 +1956,20 @@ YAML::Node WaveformGroup::SerializeConfiguration(IDTable& table)
 {
 	auto areas = GetWaveformAreas();
 
+	//X axis positions are saved as integers when they fit in an int64_t, so older versions (which read them as
+	//integers) can still load the session. Below 2^53 this drops a fraction of an X axis unit; above that, a double is
+	//already a whole number so it's exact.
+	auto xAxisValue = [](double x)
+	{
+		if(fabs(x) < MAX_TICKS)
+			return YAML::Node(static_cast<long long>(llround(x)));
+		return YAML::Node(x);
+	};
+
 	YAML::Node node;
 	node["timebaseResolution"] = "fs";
 	node["pixelsPerXUnit"] = m_pixelsPerXUnit;
-	node["xAxisOffset"] = m_xAxisOffset;
+	node["xAxisOffset"] = xAxisValue(m_xAxisOffset);
 	node["name"] = m_title;
 	node["id"] = m_id;
 
@@ -1978,8 +1988,8 @@ YAML::Node WaveformGroup::SerializeConfiguration(IDTable& table)
 			node["cursorConfig"] = "none";
 	}
 
-	node["xcursor0"] = m_xAxisCursorPositions[0];
-	node["xcursor1"] = m_xAxisCursorPositions[1];
+	node["xcursor0"] = xAxisValue(m_xAxisCursorPositions[0]);
+	node["xcursor1"] = xAxisValue(m_xAxisCursorPositions[1]);
 
 	for(size_t i=0; i<areas.size(); i++)
 	{
